@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+.idea/
+.vscode/
+*.egg-info/
+.venv/
+venv/
+
+# Application outputs
+runs/
+.cache/
+*.pt
+*.pth
+*.onnx
+*.torchscript
+*.log
+
+# Docker / deployment
+.env
+docker/data/
+docker/runs/
+
+# Synthetic datasets and short runs built by tests/ui/fixtures.py
+.ui-fixtures/

@@ -1,0 +1,35 @@
+# Keep the build context small — it is copied into the image wholesale.
+
+.git/
+.gitignore
+.github/
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+.DS_Store
+.idea/
+.vscode/
+
+# Local outputs and caches
+runs/
+.cache/
+docker/data/
+docker/runs/
+*.log
+
+# Model weights: these are downloaded at run time into the cache volume, and a
+# stray .pt in the repo root would add hundreds of megabytes to every build.
+*.pt
+*.pth
+*.onnx
+*.torchscript
+
+# Local configuration
+.env

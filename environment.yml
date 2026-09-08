@@ -1,0 +1,13 @@
+# Local (non-Docker) development environment:
+#   conda env create -f environment.yml && conda activate trainui
+#
+# Python 3.11 is a deliberate choice: on 3.13 some ML libraries
+# (monai, the ultralytics dependencies, the SimpleITK wheels) are still missing.
+name: trainui
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip>=24
+  - pip:
+      - -r requirements.txt

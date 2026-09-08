@@ -1,0 +1,23 @@
+[theme]
+base                     = "dark"
+primaryColor             = "#2DD4BF"
+backgroundColor          = "#0E1117"
+secondaryBackgroundColor = "#171D26"
+textColor                = "#E6EDF3"
+font                     = "sans serif"
+
+[server]
+maxUploadSize    = 2048
+fileWatcherType  = "auto"
+runOnSave        = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+showErrorDetails = true
+toolbarMode      = "minimal"
+
+# Note: the Docker image overrides the [server] values above through
+# STREAMLIT_SERVER_* environment variables (see docker-compose.yml) — the file
+# watcher and run-on-save are development conveniences only.
