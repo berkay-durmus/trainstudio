@@ -1,0 +1,23 @@
+# Reverse proxy in front of TrainStudio, with basic authentication.
+# Used only by the `proxy` compose profile.
+#
+# Streamlit talks to the browser over a WebSocket; Caddy's reverse_proxy handles
+# the upgrade automatically, so nothing extra is needed for that.
+
+:8080 {
+	encode zstd gzip
+
+	basic_auth {
+		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+	}
+
+	reverse_proxy trainstudio:8501 {
+		# Training runs can stream for hours; do not cut the connection short.
+		flush_interval -1
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

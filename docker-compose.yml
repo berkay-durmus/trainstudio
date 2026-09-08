@@ -1,0 +1,146 @@
+# TrainStudio — deployment for a single GPU workstation.
+#
+#   cp .env.example .env      # then edit the paths
+#   docker compose build
+#   docker compose up -d
+#   docker compose logs -f
+#
+# Requires the NVIDIA Container Toolkit on the host:
+#   https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/
+
+services:
+  trainstudio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CUDA_IMAGE: ${CUDA_IMAGE:-nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu124}
+        TORCH_VERSION: ${TORCH_VERSION:-2.5.1}
+        TORCHVISION_VERSION: ${TORCHVISION_VERSION:-0.20.1}
+    image: trainstudio:${TAG:-latest}
+    container_name: trainstudio
+    restart: unless-stopped
+
+    # ── GPU ──────────────────────────────────────────────────────────────────
+    # GPU_COUNT is how many GPUs to reserve ("1", "2", … or "all").
+    # To pin a *specific* card instead, replace `count` with a literal list —
+    # `device_ids: ["1"]` — since a list cannot be built from an env var.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${GPU_COUNT:-1}
+              capabilities: [gpu]
+
+    # ── Ports ────────────────────────────────────────────────────────────────
+    # Bound to 127.0.0.1 by default. To open it to the team on the LAN, set
+    # BIND_ADDRESS=0.0.0.0 in .env — or, better, run the `proxy` profile below.
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${HOST_PORT:-8501}:8501"
+
+    # ── Volumes ──────────────────────────────────────────────────────────────
+    # Host paths are mounted at the SAME path inside the container. That is the
+    # whole trick: a path you can browse on the host resolves identically in the
+    # container, so the folder picker roams freely and datasets can live
+    # anywhere and be moved later without touching this file. Mounting them
+    # somewhere else (say at /data) would break that identity and pin you to one
+    # location.
+    volumes:
+      # Every user home — covers ~/Desktop/..., ~/projects/..., anything under it
+      - ${HOME_MOUNT:-/home}:${HOME_MOUNT:-/home}
+      # Extra disks and NAS shares
+      - ${MNT_MOUNT:-/mnt}:${MNT_MOUNT:-/mnt}
+      # Removable and auxiliary drives — on many workstations this is where the
+      # large data disks actually live (/media/<user>/<label>/...)
+      - ${MEDIA_MOUNT:-/media}:${MEDIA_MOUNT:-/media}
+      # Add more the same way — always <host path>:<same host path>:
+      #   - /srv/datasets:/srv/datasets
+      # Downloaded pretrained weights (timm / HuggingFace / Ultralytics)
+      - trainstudio-cache:/cache
+      # User preferences and the YOLO conversion cache
+      - trainstudio-home:/opt/trainstudio-state
+
+    # ── Resources ────────────────────────────────────────────────────────────
+    # DataLoader workers communicate through shared memory; the 64MB default is
+    # far too small and shows up as a confusing "bus error" during training.
+    shm_size: ${SHM_SIZE:-16gb}
+    ulimits:
+      memlock: -1
+      stack: 67108864
+
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-UTC}
+      # HOST_HOME makes Path.home() inside the container resolve to your real
+      # home directory, so the picker's Home/Desktop shortcuts land in the right
+      # place instead of the container's own throwaway home.
+      # Defaults deliberately point at the container's OWN writable dirs, not at
+      # a guessed host path: /root is unreadable to the app user (uid 1000) and a
+      # default pointing there fails with a bare EACCES instead of a useful
+      # message. Set HOST_HOME in .env to get your real home.
+      HOME: ${HOST_HOME:-/opt/trainstudio-home}
+      # Where new runs default to. Must be a path that is mounted above, or the
+      # results are written inside the container and lost when it is recreated.
+      TRAINSTUDIO_RUNS_DIR: ${RUNS_DIR:-/opt/trainstudio-state/runs}
+      # Optional extra shortcuts in the folder picker, colon-separated
+      TRAINSTUDIO_QUICK_DIRS: ${QUICK_DIRS:-}
+      # BLAS thread counts. Keep them below the host's core count so the data
+      # pipeline still has room.
+      OMP_NUM_THREADS: ${OMP_NUM_THREADS:-8}
+      MKL_NUM_THREADS: ${MKL_NUM_THREADS:-8}
+      # Which GPUs are visible is decided by the deploy reservation above; this
+      # only asks the toolkit for the compute + nvidia-smi libraries.
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      # Streamlit
+      STREAMLIT_SERVER_MAX_UPLOAD_SIZE: ${MAX_UPLOAD_MB:-2048}
+      STREAMLIT_BROWSER_SERVER_ADDRESS: ${PUBLIC_HOSTNAME:-localhost}
+      # Only so the entrypoint can warn when the port is opened to the LAN but
+      # PUBLIC_HOSTNAME was left at localhost — a mismatch that otherwise shows
+      # up as a page that loads and then hangs forever.
+      BIND_ADDRESS: ${BIND_ADDRESS:-127.0.0.1}
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Optional reverse proxy with basic authentication, for sharing the app with
+  # teammates over the LAN. Streamlit has no authentication of its own.
+  #
+  #   docker compose --profile proxy up -d
+  #
+  # Generate the password hash with:
+  #   docker run --rm caddy:2-alpine caddy hash-password --plaintext 'your-password'
+  # and put the result in .env as BASIC_AUTH_HASH.
+  # ───────────────────────────────────────────────────────────────────────────
+  proxy:
+    image: caddy:2-alpine
+    container_name: trainstudio-proxy
+    restart: unless-stopped
+    profiles: ["proxy"]
+    depends_on:
+      - trainstudio
+    ports:
+      - "${PROXY_PORT:-8080}:8080"
+    environment:
+      BASIC_AUTH_USER: ${BASIC_AUTH_USER:-team}
+      # Must be set in .env before the proxy profile is used; Caddy refuses to
+      # start on an empty hash rather than serving the app unauthenticated.
+      # (A `:?` default here cannot be used — Compose interpolates every service
+      # in the file, including ones whose profile is not active.)
+      BASIC_AUTH_HASH: ${BASIC_AUTH_HASH:-}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  trainstudio-cache:
+  trainstudio-home:
+  caddy-data:
+  caddy-config:
