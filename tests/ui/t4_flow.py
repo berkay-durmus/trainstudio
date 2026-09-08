@@ -31,6 +31,17 @@ def seeded(page, **kw):
             a.session_state[k] = v
     return run_page(page, seed)
 
+def card_ids(at):
+    """The spec ids of the model cards actually rendered.
+
+    Asserting on page text would be wrong here: the out-of-catalogue picker
+    lists every timm model name, several of which contain "dinov3", so a
+    filtered catalogue still mentions it somewhere on the page.
+    """
+    return [b.proto.id.split("-")[-1].removeprefix("pick_")
+            for b in at.button if b.label in ("Select", "✓ Selected")]
+
+
 # ══ 1 · Model Selection: backends offered per task ══════════════════════════
 print("\n1 · Model Selection — the right libraries per task")
 expected = {
@@ -66,10 +77,10 @@ at2 = seeded("pages/2_Model_Selection.py",
              **{st_keys.K_DATASET: ds(Task.CLASSIFICATION)})
 ms = [m for m in at2.multiselect if (m.label or "") == "Library"][0]
 at3 = ms.set_value(["torchvision"]).run()
-t3 = blob(at3)
+ids = card_ids(at3)
 record("modelsel", "filtering to torchvision keeps only its models",
-       "dinov3" not in t3 and "resnet-18" in t3.replace("resnet-18","resnet-18"),
-       f"has DINOv3={'dinov3' in t3}")
+       bool(ids) and all(i.startswith("tv_") for i in ids),
+       f"{len(ids)} cards, non-torchvision: {[i for i in ids if not i.startswith('tv_')]}")
 
 # select a torchvision card
 picked = None
@@ -115,9 +126,10 @@ base_cards = blob(at).count("select")
 ti = [t for t in at.text_input if "Search" in (t.label or "") or t.placeholder]
 if ti:
     at2 = ti[0].set_value("resnet").run()
-    t2 = blob(at2)
-    record("filters", "a text search narrows the list",
-           "resnet" in t2 and "dinov3" not in t2, f"has DINOv3={'dinov3' in t2}")
+    ids = card_ids(at2)
+    record("filters", "a text search narrows the list to matching cards",
+           bool(ids) and all("resnet" in i.lower() for i in ids),
+           f"{len(ids)} cards: {ids[:6]}")
     at3 = ti[0].set_value("zzzz-no-such-model").run()
     record("filters", "an impossible search shows an empty state",
            "no model" in blob(at3) or "nothing" in blob(at3) or not at3.exception,
