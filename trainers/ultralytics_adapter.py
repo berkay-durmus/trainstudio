@@ -11,6 +11,7 @@ a single canonical format.
 
 from __future__ import annotations
 
+import os
 import shutil
 import time
 from pathlib import Path
@@ -37,6 +38,23 @@ METRIC_MAP = {
     "metrics/pixel_accuracy": "pixel_accuracy",
     "fitness": "fitness",
 }
+
+
+def _weights_path(weights: str) -> Path:
+    """Where a bare release name such as `yolo26n-cls.pt` is downloaded to.
+
+    Ultralytics downloads a bare name into the working directory — the project
+    root, or the image's /app in Docker, where it is lost on every rebuild. A full
+    path is downloaded to that path, so point it at the shared weight cache
+    instead (XDG_CACHE_HOME is the mounted /cache volume in the container).
+    """
+    p = Path(weights)
+    if p.parent != Path(".") or p.exists():
+        return p            # a user-supplied path, or a file already in place
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    target = cache / "trainstudio" / "ultralytics" / p.name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    return target
 
 
 class UltralyticsTrainer:
@@ -284,14 +302,19 @@ class UltralyticsTrainer:
                 )
 
             weights = self.cfg.model.arch
-            try:
-                self.model = YOLO(weights)
-            except Exception as exc:
-                # If the pretrained weights cannot be downloaded, build from the architecture definition
-                yaml_name = weights.replace(".pt", ".yaml")
-                self.w.log(f"Could not load `{weights}` ({exc}); starting from scratch "
-                           f"with `{yaml_name}`.", "warning")
+            yaml_name = weights.replace(".pt", ".yaml")
+            if not self.hp.pretrained:
+                # A .pt always carries its pretrained weights, whatever train() is told
+                self.w.log(f"Training from scratch: building `{yaml_name}`.")
                 self.model = YOLO(yaml_name)
+            else:
+                try:
+                    self.model = YOLO(str(_weights_path(weights)))
+                except Exception as exc:
+                    # If the pretrained weights cannot be downloaded, build from the architecture definition
+                    self.w.log(f"Could not load `{weights}` ({exc}); starting from scratch "
+                               f"with `{yaml_name}`.", "warning")
+                    self.model = YOLO(yaml_name)
 
             self._register(self.model)
             self.w.emit(E.RUN_START, run_name=self.cfg.run_name,
