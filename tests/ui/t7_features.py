@@ -220,5 +220,72 @@ for spec_id, ds in [("tv_convnext_base", CLS_DS), ("smp_unet", SEG_DS), ("hf_seg
     at = settings(spec_id, ds)
     record("settings", f"{spec_id}: renders", not at.exception, f"{[e.value for e in at.exception][:1]}")
 
+# ══ 6 · Presets ════════════════════════════════════════════════════════════
+print("\n6 · Presets: save, apply to another model, apply from a past run")
+from core import presets
+
+at = settings("efficientnet_b0")
+rec_bs = ss_get(at, K.K_HP).batch_size
+at = at.number_input(key="f_epochs").set_value(77).run()
+at = at.number_input(key="f_batch_size").set_value(rec_bs + 5).run()
+at = at.number_input(key="f_drop_rate").set_value(0.3).run()
+at = at.toggle(key="f_ema").set_value(True).run()
+at = at.number_input(key="f_ema_decay").set_value(0.999).run()
+at = at.text_input(key="preset_name").set_value("t7 recipe").run()
+at = at.button(key="preset_save").click().run()
+saved = os.path.join(TMP, "home", "presets", "t7-recipe.json")
+record("presets", "saving writes a preset file under TRAINSTUDIO_HOME",
+       os.path.isfile(saved) and not at.exception, saved)
+record("presets", "it is listed", [p.name for p in presets.list_presets()] == ["t7 recipe"],
+       f"{[p.name for p in presets.list_presets()]}")
+
+
+def load(at, option, model_specific=False):
+    at = at.selectbox(key="preset_pick").select(option).run()
+    if model_specific:
+        at = at.checkbox(key="preset_model_specific").check().run()
+    return at.button(key="preset_apply").click().run()
+
+
+at = settings("tv_efficientnet_v2_s")
+tv_bs = ss_get(at, K.K_HP).batch_size
+at = load(at, ("preset", "t7-recipe"))
+hp = ss_get(at, K.K_HP)
+record("presets", "another model takes the recipe (epochs, dropout, EMA)",
+       hp.epochs == 77 and abs(hp.drop_rate - 0.3) < 1e-9 and hp.ema and abs(hp.ema_decay - 0.999) < 1e-9,
+       f"epochs={hp.epochs} drop={hp.drop_rate} ema={hp.ema}/{hp.ema_decay}")
+record("presets", "but keeps its own batch size by default", hp.batch_size == tv_bs,
+       f"{hp.batch_size} vs recommended {tv_bs}")
+record("presets", "applied fields are marked as changed",
+       {"epochs", "drop_rate", "ema"} <= (ss_get(at, K.K_TOUCHED) or set()), "")
+record("presets", "the widgets show the applied values",
+       at.number_input(key="f_epochs").value == 77, f"{at.number_input(key='f_epochs').value}")
+record("presets", "what was left out is listed", any("kept as they were" in e.label for e in at.expander),
+       f"{[e.label for e in at.expander][:4]}")
+
+at = load(settings("tv_efficientnet_v2_s"), ("preset", "t7-recipe"), model_specific=True)
+record("presets", "ticking the box copies the model-specific values too",
+       ss_get(at, K.K_HP).batch_size == rec_bs + 5, f"{ss_get(at, K.K_HP).batch_size}")
+
+at = settings("smp_unet", SEG_DS)
+seg_before = ss_get(at, K.K_HP)
+at = load(at, ("preset", "t7-recipe"))
+hp = ss_get(at, K.K_HP)
+record("presets", "a different task keeps its own loss and monitored metric",
+       hp.loss == seg_before.loss and hp.monitor_metric == "dice_macro", f"{hp.loss} {hp.monitor_metric}")
+record("presets", "and skips dropout U-Net cannot apply", hp.drop_rate == 0.0, f"{hp.drop_rate}")
+record("presets", "while the shared recipe still arrives", hp.epochs == 77 and hp.ema, "")
+
+past = copy_run("tv-cls", "preset-source", ROOT)
+at = page("views/3_Settings.py", **{K.K_DATASET: CLS_DS, K.K_SPEC: get("efficientnet_b0"),
+                                    K.K_OUTPUT: ROOT})
+at = load(at, ("run", past))
+record("presets", "a past run's configuration can be applied",
+       ss_get(at, K.K_HP).epochs == runs.load_summary(past).config.hp.epochs and not at.exception,
+       f"{ss_get(at, K.K_HP).epochs}")
+at = at.selectbox(key="preset_pick").select(("preset", "t7-recipe")).run()
+at = at.button(key="preset_delete").click().run()
+record("presets", "a preset can be deleted", not os.path.exists(saved), "")
+
 shutil.rmtree(TMP, ignore_errors=True)
 sys.exit(summary("UI TEST 7 · new features"))

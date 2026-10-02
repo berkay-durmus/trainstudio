@@ -12,7 +12,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from core import prefs, runs
+from core import prefs, presets, runs
 from core.capabilities import supports
 from core.hardware import detect
 from core.launcher import LaunchError, start_run
@@ -23,6 +23,7 @@ from core.schemas import (
     AugConfig,
     Backend,
     Hyperparams,
+    LOSS_CHOICES,
     METRIC_HIGHER_IS_BETTER,
     ModelSelection,
     RunConfig,
@@ -64,6 +65,68 @@ touched = state.touched()
 if spec.needs_encoder:
     hp.encoder = state.get(state.K_ENCODER) or hp.encoder
 
+# ── Presets ──────────────────────────────────────────────────────────────────
+
+
+def preset_controls() -> None:
+    """Save these settings under a name, or lay a saved preset / past run over them."""
+    with st.popover("💾 Save preset", width="stretch"):
+        name = st.text_input("Preset name", key="preset_name",
+                             placeholder="e.g. strong-aug-cosine")
+        clash = bool(name.strip()) and presets.exists(name)
+        if clash:
+            st.warning(f"A preset called “{name.strip()}” exists and will be replaced.")
+        if st.button("Save", type="primary", key="preset_save", width="stretch",
+                     disabled=not name.strip()):
+            try:
+                presets.save_preset(name, hp, aug, ds.task, spec.display_name)
+                st.toast(f"Preset “{name.strip()}” saved")
+            except (OSError, ValueError) as exc:
+                st.error(f"Could not save: {exc}")
+
+    with st.popover("📂 Load preset", width="stretch"):
+        saved = presets.list_presets()
+        past = [s for s in runs.list_runs_multi([state.output_dir()])
+                if s.config is not None][:20]
+        options = [("preset", p.slug) for p in saved] + [("run", s.run_dir) for s in past]
+        if not options:
+            st.caption("No saved presets or past runs yet. Save one with 💾.")
+            return
+        names = {("preset", p.slug): f"💾 {p.name} · {p.task.label} · {p.source_model}"
+                 for p in saved}
+        names.update({("run", s.run_dir): f"🗂️ {s.run_name} · {s.model}" for s in past})
+        pick = st.selectbox("Load from", options, format_func=lambda o: names[o],
+                            key="preset_pick")
+        with_model = st.checkbox(f"Also apply the model-specific values ({presets.MODEL_SPECIFIC_LABEL})",
+                                 value=False, key="preset_model_specific",
+                                 help="Off: those values stay as recommended for "
+                                      f"{spec.display_name}.")
+        b1, b2 = st.columns(2)
+        if b1.button("Apply", type="primary", key="preset_apply", width="stretch"):
+            src = presets.load_preset(pick[1]) if pick[0] == "preset" else presets.from_run(pick[1])
+            if src is None:
+                st.error("That preset could not be read.")
+                return
+            new_hp, new_aug, applied, skipped = presets.apply_preset(
+                src, hp, aug, spec=spec, task=ds.task, medical=ds.modality.is_medical,
+                include_model_specific=with_model)
+            state.put(state.K_HP, new_hp)
+            state.put(state.K_AUG, new_aug)
+            if "encoder" in applied:
+                state.put(state.K_ENCODER, new_hp.encoder)
+            for f in applied:
+                state.mark_touched(f)
+            msg = f"“{src.name}”: {len(applied)} setting(s) applied"
+            if skipped:
+                msg += f", {len(skipped)} kept as they were"
+            st.toast(msg)
+            state.put(state.K_PRESET_SKIPPED, skipped)
+            st.rerun()
+        if pick[0] == "preset" and b2.button("Delete", key="preset_delete", width="stretch"):
+            presets.delete_preset(pick[1])
+            st.rerun()
+
+
 # ── Top strip ────────────────────────────────────────────────────────────────
 top = st.container(border=True)
 with top:
@@ -88,6 +151,15 @@ with top:
             state.put(state.K_AUG, fresh.aug.model_copy(deep=True))
             state.reset_touched()
             st.rerun()
+        preset_controls()
+
+# Shown once, on the rerun right after a preset was applied
+skipped = state.get(state.K_PRESET_SKIPPED)
+if skipped:
+    state.clear(state.K_PRESET_SKIPPED)
+    with st.expander(f"ℹ️ {len(skipped)} setting(s) from the preset were kept as they were"):
+        for f, why in sorted(skipped.items()):
+            st.markdown(f"- `{f}` — {why}")
 
 for w in rec.warnings:
     (st.warning if w.startswith("⚠️") else st.info)(w)
@@ -279,14 +351,14 @@ with t_loss:
         c1, c2 = st.columns(2)
         with c1:
             if ds.task == Task.CLASSIFICATION:
-                select_field("loss", ["ce", "focal", "bce"], label="Loss function")
+                select_field("loss", list(LOSS_CHOICES[ds.task]), label="Loss function")
                 select_field("class_weights", ["none", "balanced"], label="Class weights",
                              format_func=lambda v: {"none": "None", "balanced": "Balanced"}[v],
                              why_key="loss")
                 field("label_smoothing", st.number_input, min_value=0.0, max_value=0.5,
                       step=0.01, label="Label smoothing")
             else:
-                select_field("loss", ["dice_ce", "dice_focal", "dice", "ce", "tversky", "focal"],
+                select_field("loss", list(LOSS_CHOICES[ds.task]),
                              label="Loss function")
                 field("dice_weight", st.slider, min_value=0.0, max_value=1.0, step=0.05,
                       label="Dice weight", why_key="loss")

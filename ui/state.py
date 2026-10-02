@@ -30,6 +30,7 @@ K_TOUCHED = "flow.touched"          # the fields the user changed by hand
 K_OUTPUT = "flow.output_dir"        # str
 K_RUN_NAME = "flow.run_name"        # str
 K_ACTIVE_RUN = "flow.active_run"    # str — the run directory being watched
+K_PRESET_SKIPPED = "flow.preset_skipped"  # {field: reason} from the last preset applied
 
 
 # ─────────────────────────────────────────────────────────────────────────────
