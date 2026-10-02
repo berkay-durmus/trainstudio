@@ -7,6 +7,7 @@ parsed only when a run is actually opened.
 
 from __future__ import annotations
 
+import os
 import shutil
 import time
 from dataclasses import dataclass, field
@@ -62,18 +63,26 @@ def process_alive(pid: int | None) -> bool:
     """Is the PID still running — state.json can stay 'running' after a crash."""
     if not pid:
         return False
+    # A run launched from this UI is our child, and nothing else waits on it: once
+    # it exits it stays a zombie, which pid_exists() still reports as alive — so a
+    # crashed run would read 'running' forever. Reap it here if it has exited.
+    try:
+        if os.waitpid(int(pid), os.WNOHANG)[0] != 0:
+            return False
+    except (ChildProcessError, OSError, AttributeError):
+        pass        # not our child (or no waitpid on this platform)
     try:
         import psutil
-
-        return psutil.pid_exists(int(pid))
     except ImportError:
-        import os
-
         try:
             os.kill(int(pid), 0)
             return True
         except (OSError, ProcessLookupError, PermissionError):
             return False
+    try:
+        return psutil.Process(int(pid)).status() != psutil.STATUS_ZOMBIE
+    except psutil.AccessDenied:
+        return True         # it exists, it just isn't ours
     except Exception:
         return False
 
@@ -156,6 +165,13 @@ def load_summary(run_dir: str | Path) -> RunSummary | None:
     if s.status == RunStatus.RUNNING and not process_alive(s.pid):
         s.status = RunStatus.FAILED
         s.error = s.error or "The process ended unexpectedly (state.json was left at 'running')."
+    # So is 'queued' once the launched process is gone: it died before training
+    # began, and only runner.out says why. A queued run without a PID was never
+    # launched (or predates the launcher recording one) and is left alone.
+    elif s.status == RunStatus.QUEUED and s.pid and not process_alive(s.pid):
+        s.status = RunStatus.FAILED
+        s.error = s.error or ("The process exited before training began — "
+                              "see the process output (runner.out).")
 
     return s
 

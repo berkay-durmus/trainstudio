@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.events import read_state
+from core.events import _atomic_write, read_state
 from core.hardware import environment_snapshot
 from core.runs import process_alive
 from core.schemas import Layout, RunConfig, RunStatus
@@ -26,6 +27,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RUNNER = PROJECT_ROOT / "runner.py"
 STDOUT_FILE = "runner.out"
 GRACEFUL_TIMEOUT_S = 30.0
+OUTPUT_DIRS = (Layout.CHECKPOINTS, Layout.METRICS_DIR, Layout.PLOTS,
+               Layout.PREVIEWS, Layout.PREDICTIONS, Layout.EXPORTS)
 
 
 class LaunchError(RuntimeError):
@@ -56,13 +59,16 @@ def prepare_run_dir(cfg: RunConfig, overwrite: bool = False) -> Path:
             "or confirm overwriting."
         )
     run_dir.mkdir(parents=True, exist_ok=True)
-    for sub in (Layout.CHECKPOINTS, Layout.METRICS_DIR, Layout.PLOTS,
-                Layout.PREVIEWS, Layout.PREDICTIONS, Layout.EXPORTS):
-        (run_dir / sub).mkdir(parents=True, exist_ok=True)
 
-    # Leftovers from an earlier attempt must not pollute the new run
-    for stale in (Layout.STOP, Layout.EVENTS, Layout.STATE):
+    # Leftovers from an earlier attempt must not pollute the new run: the logs are
+    # appended to, and an old best.pt or report would pass for this run's output
+    # if it failed early. Only the run layout is removed, nothing else in the folder.
+    for stale in (Layout.STOP, Layout.EVENTS, Layout.STATE, Layout.LOG,
+                  Layout.REPORT, STDOUT_FILE):
         (run_dir / stale).unlink(missing_ok=True)
+    for sub in OUTPUT_DIRS:
+        shutil.rmtree(run_dir / sub, ignore_errors=True)
+        (run_dir / sub).mkdir(parents=True, exist_ok=True)
 
     cfg.save()
     (run_dir / Layout.ENV).write_text(
@@ -106,21 +112,37 @@ def start_run(cfg: RunConfig, overwrite: bool = False,
 
     out_path = run_dir / STDOUT_FILE
     try:
-        out_fh = out_path.open("ab")
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(PROJECT_ROOT),
-            env=env,
-            stdout=out_fh,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            # Its own process session: a Ctrl-C aimed at Streamlit will not kill training
-            start_new_session=True,
-        )
+        # The child holds its own copy of the descriptor; ours is closed on exit
+        with out_path.open("ab") as out_fh:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(PROJECT_ROOT),
+                env=env,
+                stdout=out_fh,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                # Its own process session: a Ctrl-C aimed at Streamlit will not kill training
+                start_new_session=True,
+            )
     except Exception as exc:
         raise LaunchError(f"Could not start the process: {exc}") from exc
 
+    # Record the PID straight away. A process that dies before the trainer writes
+    # its first state (a bad config.json, an import error) would otherwise leave
+    # the run 'queued' with nothing to tell that it is gone.
+    _record_pid(run_dir, proc.pid)
     return Launched(run_dir=run_dir, pid=proc.pid, command=cmd)
+
+
+def _record_pid(run_dir: Path, pid: int) -> None:
+    st = read_state(run_dir)
+    if st.get("status", RunStatus.QUEUED.value) != RunStatus.QUEUED.value or st.get("pid"):
+        return      # the runner got there first
+    st["pid"] = pid
+    try:
+        _atomic_write(run_dir / Layout.STATE, json.dumps(st, indent=2))
+    except Exception:
+        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
