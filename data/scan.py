@@ -71,6 +71,9 @@ class ScanResult:
 
     preview: list[dict] = field(default_factory=list)   # {"image": path, "mask": path, "label": str}
     candidates: list[str] = field(default_factory=list)  # dataset roots found one level down
+    # A structural problem the page explains in a dialog, beyond the issue list:
+    # {"kind": "flat_splits", "splits": {split: {"files": n, "examples": [...]}}}
+    layout_problem: dict | None = None
     from_yaml: bool = False
     sampled: int = 0
     elapsed: float = 0.0
@@ -233,6 +236,8 @@ def _scan_dataset(
                 _diagnose(root),
                 items=[p.name for p in dspec.listdir(root)[:12] if not p.name.startswith(".")],
             )
+            if dspec.is_dir(dspec.split_dir(root, dspec.REQUIRED_SPLIT)):
+                res.layout_problem = _flat_splits(root, dspec.present_splits(root))
         return _finish(res, t0)
     res.task = task
 
@@ -267,9 +272,13 @@ def _scan_dataset(
             "Only `train/` was found. You can split automatically below; the original files "
             "are not copied, only a `splits.json` is written.",
         )
-    if res.n_test == 0:
-        res.add("info", "There is no test set",
-                "A separate test split is recommended if you are working towards publication.")
+    if res.n_test == 0 and res.layout_problem is None:
+        if "test" in splits:
+            res.add("info", f"`{dspec.split_dir(root, 'test').name}/` holds no usable samples",
+                    "The folder exists but nothing in it could be used as a test set.")
+        else:
+            res.add("info", "There is no test set",
+                    "A separate test split is recommended if you are working towards publication.")
     if 0 < res.n_train < 50:
         res.add("warning", f"The training set is very small ({res.n_train} samples)",
                 "Results may not be reliable; consider strong augmentation and cross-validation.")
@@ -326,8 +335,40 @@ def _diagnose(root: Path) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _flat_splits(root: Path, splits: list[str]) -> dict | None:
+    """Images lying directly in the split folders, with no class folders under train/.
+
+    One mistake, which the per-split checks below would otherwise report as
+    several unrelated ones ("files outside class folders" for every split,
+    "at least two classes", "no test set").
+    """
+    if dspec.subdirs(dspec.split_dir(root, "train")):
+        return None
+    found = {}
+    for split in splits:
+        loose = list_files(dspec.split_dir(root, split))
+        if loose:
+            found[split] = {"files": len(loose), "examples": [p.name for p in loose[:4]]}
+    return {"kind": "flat_splits", "splits": found} if "train" in found else None
+
+
 def _scan_classification(root: Path, splits: list[str], res: ScanResult,
                          rng: random.Random, sample_size: int) -> None:
+    flat = _flat_splits(root, splits)
+    if flat:
+        res.layout_problem = flat
+        counts = flat["splits"]
+        where = ", ".join(f"`{dspec.split_dir(root, s).name}/` {c['files']:,}" for s, c in counts.items())
+        res.add("error", "The images are not in class folders",
+                f"Images lie directly in the split folders ({where}). Classification needs "
+                "one subfolder per class inside each split — `train/cat/`, `train/dog/` — "
+                "so that each image's folder says what it is. For segmentation, put them in "
+                "`images/` beside a `masks/` folder instead.",
+                items=counts["train"]["examples"])
+        for s in splits:
+            res.split_counts[s] = 0
+        return
+
     per_split_classes: dict[str, list[str]] = {}
     all_files: list[Path] = []
 
