@@ -29,6 +29,7 @@ PARTS = [
     ("t4", "t4_flow.py",             "model catalogue, settings, results, inference"),
     ("t5", "t5_navigation.py",       "navigation and a full walk-through"),
     ("t6", "t6_actions.py",          "predictions, Grad-CAM, export, comparison"),
+    ("t7", "t7_features.py",         "deleting runs, presets, analysis, standardising"),
 ]
 
 TALLY = re.compile(r"^UI TEST .*?: (\d+)/(\d+) passed$", re.M)

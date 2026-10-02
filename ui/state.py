@@ -116,6 +116,15 @@ def reset_touched() -> None:
     put(K_TOUCHED, set())
 
 
+def forget_run(run_dir: str) -> None:
+    """Drop every reference to a run that has just been deleted."""
+    if get(K_ACTIVE_RUN) == str(run_dir):
+        clear(K_ACTIVE_RUN)
+    # The Training page's metric accumulator for the run it was watching
+    if get("train.acc_dir") == str(run_dir):
+        clear("train.acc", "train.acc_dir")
+
+
 def done_steps() -> set[int]:
     """The completed steps shown in the flow indicator."""
     done: set[int] = set()

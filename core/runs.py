@@ -299,13 +299,43 @@ def available_metrics(run_dirs: list[str | Path]) -> list[str]:
     return cols
 
 
-def delete_run(run_dir: str | Path) -> bool:
-    """Permanently delete a run directory. Only ever deletes a real run directory."""
-    p = Path(run_dir)
-    if not is_run_dir(p):
+def is_deletable(s: RunSummary) -> bool:
+    """A run may be deleted once nothing is writing to it any more.
+
+    'queued' with a live process is a run that is still starting up — deleting
+    it would pull the folder from under a process about to train into it.
+    """
+    if s.status in (RunStatus.RUNNING, RunStatus.QUEUED) and process_alive(s.pid):
         return False
+    return True
+
+
+def delete_run(run_dir: str | Path) -> tuple[bool, str]:
+    """Permanently delete a run directory → (deleted, reason when it was not).
+
+    Only ever deletes a real run directory, and never one that is still being
+    written to — checked here rather than trusted to the caller.
+    """
+    p = Path(run_dir)
+    s = load_summary(p)
+    if s is None:
+        return False, "not a run directory"
+    if not is_deletable(s):
+        return False, "still running — stop it first"
     shutil.rmtree(p, ignore_errors=True)
-    return not p.exists()
+    return (False, "could not remove every file") if p.exists() else (True, "")
+
+
+def delete_runs(run_dirs) -> tuple[list[str], dict[str, str]]:
+    """Delete several runs → (deleted, {run_dir: reason} for those left in place)."""
+    deleted, kept = [], {}
+    for d in run_dirs:
+        ok, why = delete_run(d)
+        if ok:
+            deleted.append(str(d))
+        else:
+            kept[str(d)] = why
+    return deleted, kept
 
 
 def dir_size_mb(path: str | Path) -> float:

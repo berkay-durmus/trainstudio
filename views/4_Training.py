@@ -20,6 +20,7 @@ from core.schemas import Layout, RunStatus, metric_mode
 from ui import state
 from ui.charts import curves, sparkline
 from ui.components import (
+    delete_run_control,
     dim,
     empty_state,
     faint,
@@ -283,6 +284,8 @@ with c:
 with d:
     if st.button("📊 Compare in Results", width="stretch"):
         st.switch_page("views/5_Results.py")
+    if summary.status.is_terminal:
+        delete_run_control(summary, key=f"train_{run_dir}", label="🗑️ Delete this run")
 
 if cfg is not None:
     with st.expander("⚙️ This run's configuration"):
