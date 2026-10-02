@@ -20,7 +20,7 @@ python scripts/check_dataset.py <path>                 # how a dataset path is i
 python scripts/make_dummy_dataset.py --out /tmp/ts_data --kinds cls seg dicom seg3d
 
 python tests/ui/run_all.py                             # whole UI suite (builds fixtures first if missing)
-python tests/ui/run_all.py t4                          # one part (t1…t8)
+python tests/ui/run_all.py t4                          # one part (t1…t9)
 python tests/ui/run_all.py --rebuild                   # regenerate fixtures
 python tests/ui/t4_flow.py                             # run one part's script directly (fixtures must exist)
 ```
@@ -62,7 +62,9 @@ stop signal, event emission, checkpoints, metric tables and the final report. Su
 implement `build_model`, `build_data` and `new_metrics`, and optionally override
 `forward_batch`, `compute_loss` and `save_preview`. A new backend needs a `Backend` enum
 value, registry entries, a trainer, a branch in `build_trainer`, and checkpoint-loading
-support in `export/inference.py`. Build every DataLoader with
+support in `export/inference.py` (its `model_logits` reads every kind of model output; LIME
+and SHAP in `export/explain.py` see a model only through `ScoreFn`, so a new backend needs
+nothing there unless Grad-CAM cannot find its layer). Build every DataLoader with
 `**self.loader_source(split, dataset)`: the training split then draws its order and a
 per-sample augmentation seed from torch's RNG (`data/seeding.py`), which is what makes
 `hp.seed` reproducible and a resumed run identical to an uninterrupted one.
