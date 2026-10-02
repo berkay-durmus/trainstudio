@@ -858,8 +858,9 @@ trainers/   base.py      the shared training loop
 metrics/    classification.py  segmentation.py  report.py
 export/     inference.py the checkpoint loader, prediction, Grad-CAM and export
 ui/         theme.py  components.py  charts.py  dir_picker.py  state.py
-pages/      0_Dashboard  1_Dataset  2_Model_Selection  3_Settings
+views/      0_Dashboard  1_Dataset  2_Model_Selection  3_Settings
             4_Training   5_Results  6_Inference
+            (deliberately not pages/ — see the note in app.py)
 scripts/    check_dataset.py  make_dummy_dataset.py  set_proxy_password.sh
 tests/ui/   the AppTest suite and its synthetic fixtures
 docker/     entrypoint.sh  Caddyfile

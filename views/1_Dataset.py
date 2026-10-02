@@ -348,4 +348,4 @@ with btn_col:
         state.set_dataset(ds_cfg, window)
         state.put(state.K_SCAN, res)
         set_selection("dataset", res.root)
-        st.switch_page("pages/2_Model_Selection.py")
+        st.switch_page("views/2_Model_Selection.py")

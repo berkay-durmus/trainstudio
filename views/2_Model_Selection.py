@@ -105,7 +105,7 @@ if chosen and chosen.task == ds.task:
                 faint(chosen.summary)
         with c:
             if st.button("Continue →", type="primary", width="stretch"):
-                st.switch_page("pages/3_Settings.py")
+                st.switch_page("views/3_Settings.py")
 
 st.caption(f"{len(results)} models · newest first")
 

@@ -3,7 +3,7 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harness import T, dp, record, run_page, blob, messages, summary, ss_get
 
-PAGE = "pages/1_Dataset.py"
+PAGE = "views/1_Dataset.py"
 GOOD = os.path.join(T, "ts_data", "cls_shapes")          # a real dataset
 TYPED = dp("dataset", "typed")
 

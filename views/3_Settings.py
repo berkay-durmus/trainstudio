@@ -440,7 +440,7 @@ if b2.button("🚀 Start training", type="primary", width="stretch"):
         state.put(state.K_ACTIVE_RUN, str(launched.run_dir))
         state.put(state.K_RUN_NAME, None)
         st.success(f"Started — PID {launched.pid}")
-        st.switch_page("pages/4_Training.py")
+        st.switch_page("views/4_Training.py")
     except LaunchError as exc:
         st.error(str(exc))
     except Exception as exc:

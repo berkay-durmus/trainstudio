@@ -23,11 +23,11 @@ def _esc(s) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 STEPS: list[tuple[str, str]] = [
-    ("Dataset", "pages/1_Dataset.py"),
-    ("Model", "pages/2_Model_Selection.py"),
-    ("Settings", "pages/3_Settings.py"),
-    ("Training", "pages/4_Training.py"),
-    ("Results", "pages/5_Results.py"),
+    ("Dataset", "views/1_Dataset.py"),
+    ("Model", "views/2_Model_Selection.py"),
+    ("Settings", "views/3_Settings.py"),
+    ("Training", "views/4_Training.py"),
+    ("Results", "views/5_Results.py"),
 ]
 
 

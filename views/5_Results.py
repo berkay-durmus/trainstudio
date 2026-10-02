@@ -202,7 +202,7 @@ with h1:
 with h2:
     if st.button("📈 Open on the live page", width="stretch"):
         state.put(state.K_ACTIVE_RUN, chosen)
-        st.switch_page("pages/4_Training.py")
+        st.switch_page("views/4_Training.py")
 
 summary_path = run_dir / Layout.SUMMARY
 if summary_path.is_file():

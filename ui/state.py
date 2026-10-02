@@ -143,7 +143,7 @@ def require_dataset() -> DatasetConfig | None:
     ds = dataset()
     if ds is None:
         st.warning("Select and validate a dataset first.")
-        st.page_link("pages/1_Dataset.py", label="→ Go to the Dataset page", icon="📁")
+        st.page_link("views/1_Dataset.py", label="→ Go to the Dataset page", icon="📁")
         return None
     return ds
 
@@ -152,6 +152,6 @@ def require_spec() -> ModelSpec | None:
     s = spec()
     if s is None:
         st.warning("Select a model first.")
-        st.page_link("pages/2_Model_Selection.py", label="→ Go to the Model Selection page", icon="🧠")
+        st.page_link("views/2_Model_Selection.py", label="→ Go to the Model Selection page", icon="🧠")
         return None
     return s

@@ -87,7 +87,7 @@ with s1:
         dim(f"{ds.task.label} · {ds.n_total:,} samples · {ds.num_classes} classes")
     else:
         st.info("**1 · Dataset**\n\nNot selected yet")
-    st.page_link("pages/1_Dataset.py", label="Dataset", icon="📁", width="stretch")
+    st.page_link("views/1_Dataset.py", label="Dataset", icon="📁", width="stretch")
 
 with s2:
     if spec:
@@ -95,7 +95,7 @@ with s2:
         dim(f"{spec.family} · {spec.params_label} parameters · {spec.released}")
     else:
         st.info("**2 · Model**\n\nNot selected yet")
-    st.page_link("pages/2_Model_Selection.py", label="Model Selection", icon="🧠",
+    st.page_link("views/2_Model_Selection.py", label="Model Selection", icon="🧠",
                  width="stretch", disabled=ds is None)
 
 with s3:
@@ -104,7 +104,7 @@ with s3:
         dim(f"{hp.epochs} epochs · batch {hp.batch_size} · lr {hp.lr:.1e}")
     else:
         st.info("**3 · Settings**\n\nNot configured yet")
-    st.page_link("pages/3_Settings.py", label="Settings", icon="⚙️",
+    st.page_link("views/3_Settings.py", label="Settings", icon="⚙️",
                  width="stretch", disabled=not state.ready_to_configure())
 
 with s4:
@@ -119,7 +119,7 @@ with s4:
             st.info("**4 · Training**\n\nRun not found")
     else:
         st.info("**4 · Training**\n\nNot started")
-    st.page_link("pages/4_Training.py", label="Training", icon="🚀",
+    st.page_link("views/4_Training.py", label="Training", icon="🚀",
                  width="stretch", disabled=hp is None and active is None)
 
 st.divider()
@@ -169,10 +169,10 @@ else:
             with e:
                 if st.button("Open", key=f"open_{r.run_dir}", width="stretch"):
                     state.put(state.K_ACTIVE_RUN, r.run_dir)
-                    st.switch_page("pages/4_Training.py")
+                    st.switch_page("views/4_Training.py")
             if r.total_epochs:
                 st.progress(r.progress)
             if r.error and r.status == RunStatus.FAILED:
                 st.caption(f"🛑 {r.error[:180]}")
 
-    st.page_link("pages/5_Results.py", label="Compare all results", icon="📊")
+    st.page_link("views/5_Results.py", label="Compare all results", icon="📊")
