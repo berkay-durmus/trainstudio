@@ -34,6 +34,10 @@ class StopRequested(Exception):
     """The graceful stop signal from the UI — a controlled exit, not an error."""
 
 
+class PauseRequested(StopRequested):
+    """The UI asked to stop at the end of the epoch; nothing is lost."""
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -204,6 +208,10 @@ class BaseTrainer(ABC):
         self._last_system_event = 0.0
         self._last_batch_event = 0.0
         self._epochs_without_improvement = 0
+        self.resume = False             # set by runner.py --resume
+        self.start_epoch = 1
+        self._elapsed_before = 0.0      # training time of the earlier sessions
+        self._session_started = time.time()
 
     # ── the parts subclasses fill in ─────────────────────────────────────
     @abstractmethod
@@ -282,7 +290,12 @@ class BaseTrainer(ABC):
             self.ema = EMA(self.model, self.hp.ema_decay)
             self.w.log(f"EMA enabled (decay={self.hp.ema_decay})")
 
-        if self.hp.freeze_backbone_epochs > 0:
+        if self.resume:
+            self._restore_resume()
+
+        # The optimizer above already holds every parameter, so freezing after it
+        # (or not freezing a resumed run past the frozen epochs) is safe.
+        if self.hp.freeze_backbone_epochs >= self.start_epoch:
             self.set_backbone_frozen(True)
             self.w.log(f"Backbone frozen for the first {self.hp.freeze_backbone_epochs} epochs")
 
@@ -318,11 +331,12 @@ class BaseTrainer(ABC):
     def fit(self) -> RunStatus:
         status = RunStatus.COMPLETED
         error: str | None = None
-        started = time.time()
+        started = self._session_started = time.time()
 
         try:
             self.setup()
             self.w.emit(E.RUN_START, run_name=self.cfg.run_name,
+                        resumed_from=self.start_epoch - 1 if self.resume else None,
                         total_epochs=self.hp.epochs,
                         model=self.cfg.model.display_name or self.cfg.model.arch,
                         task=self.ds.task.value,
@@ -334,9 +348,13 @@ class BaseTrainer(ABC):
             self.w.update_state(status=RunStatus.RUNNING.value, pid=__import__("os").getpid(),
                                 run_name=self.cfg.run_name, total_epochs=self.hp.epochs,
                                 monitor_metric=self.hp.monitor_metric,
-                                started_at=started, epoch=0)
+                                started_at=started, elapsed_before=self._elapsed_before,
+                                epoch=self.start_epoch - 1)
 
-            for epoch in range(1, self.hp.epochs + 1):
+            done = self.start_epoch > self.hp.epochs or self._should_early_stop()
+            for epoch in range(self.start_epoch, self.hp.epochs + 1):
+                if done:
+                    break
                 self.epoch = epoch
                 self._maybe_unfreeze(epoch)
                 t0 = time.time()
@@ -377,6 +395,7 @@ class BaseTrainer(ABC):
                         self.scheduler.step(monitored)
 
                 self.write_metrics_table()
+                self.save_resume_state()
 
                 if self._should_early_stop():
                     self.w.log(
@@ -385,10 +404,17 @@ class BaseTrainer(ABC):
                     )
                     break
                 self.check_stop()
+                if self.w.pause_requested() and epoch < self.hp.epochs:
+                    raise PauseRequested
 
+        except PauseRequested:
+            status = RunStatus.STOPPED
+            self.w.log(f"Paused after epoch {self.epoch}; resume it from the Training page.")
         except StopRequested:
             status = RunStatus.STOPPED
-            self.w.log("Stopped at the user's request; the latest state was saved as `last.pt`.")
+            saved = self.w.state.get("resume_epoch")
+            self.w.log("Stopped at the user's request; the latest state was saved as `last.pt`."
+                       + (f" Resuming continues after epoch {saved}." if saved else ""))
             try:
                 self.save_checkpoint("last.pt")
             except Exception:
@@ -404,7 +430,11 @@ class BaseTrainer(ABC):
 
         finally:
             self.w.clear_stop()
-            duration = time.time() - started
+            duration = self._elapsed_before + time.time() - started
+            if status == RunStatus.COMPLETED:
+                # Only unfinished runs are resumed; the state is no use any more
+                self.cfg.path(Layout.RESUME).unlink(missing_ok=True)
+                self.w.update_state(resume_epoch=None)
             try:
                 self.finalize(status)
             except Exception as exc:
@@ -603,6 +633,79 @@ class BaseTrainer(ABC):
         torch.save(state, tmp)
         tmp.replace(path)
         return path
+
+    def save_resume_state(self) -> None:
+        """Everything needed to continue after this epoch exactly as if the run had
+        not been interrupted — written at every epoch boundary, apart from last.pt,
+        which a stop in the middle of an epoch overwrites."""
+        model = self.model._orig_mod if hasattr(self.model, "_orig_mod") else self.model
+        state = {
+            "format": 1,
+            "epoch": self.epoch,
+            "model": model.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "scheduler": self.scheduler.state_dict() if self.scheduler is not None else None,
+            "scaler": self.scaler.state_dict() if self.scaler is not None else None,
+            "ema": self.ema.shadow if self.ema is not None else None,
+            "global_step": self.global_step,
+            "history": self.history,
+            "best_value": self.best_value,
+            "best_epoch": self.best_epoch,
+            "epochs_without_improvement": self._epochs_without_improvement,
+            "elapsed_s": self._elapsed_before + time.time() - self._session_started,
+            "rng": {
+                "python": random.getstate(),
+                "numpy": np.random.get_state(),
+                "torch": torch.get_rng_state(),
+                "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+            },
+            "arch": self.cfg.model.arch,
+            "classes": self.ds.classes,
+        }
+        path = self.cfg.path(Layout.RESUME)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        torch.save(state, tmp)
+        tmp.replace(path)
+        self.w.update_state(resume_epoch=self.epoch)
+
+    def _restore_resume(self) -> None:
+        path = self.cfg.path(Layout.RESUME)
+        if not path.is_file():
+            raise RuntimeError("There is no resume checkpoint (checkpoints/resume.pt) to continue from.")
+        state = torch.load(path, map_location=self.device, weights_only=False)
+        if state.get("arch") != self.cfg.model.arch or state.get("classes") != self.ds.classes:
+            raise RuntimeError("The resume checkpoint belongs to a different model or class list "
+                               "than config.json; it cannot be continued.")
+        model = self.model._orig_mod if hasattr(self.model, "_orig_mod") else self.model
+        model.load_state_dict(state["model"])
+        self.optimizer.load_state_dict(state["optimizer"])
+        if self.scheduler is not None and state.get("scheduler") is not None:
+            self.scheduler.load_state_dict(state["scheduler"])
+        if self.scaler is not None and state.get("scaler") is not None:
+            self.scaler.load_state_dict(state["scaler"])
+        if self.ema is not None and state.get("ema") is not None:
+            self.ema.shadow = {k: v.to(self.device).float() for k, v in state["ema"].items()}
+        self.epoch = state["epoch"]
+        self.start_epoch = self.epoch + 1
+        self.global_step = state.get("global_step", 0)
+        self.history = list(state.get("history") or [])
+        self.best_value, self.best_epoch = state.get("best_value"), state.get("best_epoch")
+        self._epochs_without_improvement = state.get("epochs_without_improvement", 0)
+        self._elapsed_before = float(state.get("elapsed_s") or 0.0)
+        rng = state.get("rng") or {}
+        try:
+            random.setstate(rng["python"])
+            np.random.set_state(rng["numpy"])
+            torch.set_rng_state(rng["torch"].cpu())
+            if rng.get("cuda") is not None and torch.cuda.is_available():
+                torch.cuda.set_rng_state_all([s.cpu() for s in rng["cuda"]])
+        except Exception as exc:
+            self.w.log(f"Could not restore the random state ({exc}); the data order will differ "
+                       "from an uninterrupted run.", "warning")
+        best = (f" · best {self.hp.monitor_metric} {self.best_value:.4f} at epoch {self.best_epoch}"
+                if self.best_value is not None else "")
+        self.w.log(f"Resumed after epoch {self.epoch} of {self.hp.epochs}{best}")
 
     def write_metrics_table(self) -> None:
         """Rewrite metrics.csv at the end of every epoch — so a complete metric

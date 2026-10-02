@@ -83,11 +83,14 @@ class EventWriter:
         self.state_path = self.run_dir / Layout.STATE
         self.log_path = self.run_dir / Layout.LOG
         self.stop_path = self.run_dir / Layout.STOP
+        self.pause_path = self.run_dir / Layout.PAUSE
         self._fh = self.events_path.open("a", encoding="utf-8", buffering=1)
         self._log_fh = self.log_path.open("a", encoding="utf-8", buffering=1)
         self._n = 0
         self._flush_every = max(1, flush_every)
-        self._state: dict[str, Any] = {}
+        # Start from what is on disk: a resumed run keeps its best value, epoch
+        # and elapsed time until the trainer overwrites them.
+        self._state: dict[str, Any] = read_state(self.run_dir)
 
     # ── core ─────────────────────────────────────────────────────────────
     def emit(self, type: str, **payload: Any) -> None:
@@ -122,17 +125,27 @@ class EventWriter:
         except Exception:
             pass
 
+    @property
+    def state(self) -> dict[str, Any]:
+        """What state.json holds now."""
+        return dict(self._state)
+
     # ── stop signal ──────────────────────────────────────────────────────
     def stop_requested(self) -> bool:
         """The trainer calls this on every batch; the UI stops a run by creating
         this file."""
         return self.stop_path.exists()
 
-    def clear_stop(self) -> None:
-        try:
-            self.stop_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+    def pause_requested(self) -> bool:
+        """Checked once per epoch, after the resume checkpoint has been written."""
+        return self.pause_path.exists()
+
+    def clear_stop(self, pause: bool = True) -> None:
+        for path in (self.stop_path, self.pause_path) if pause else (self.stop_path,):
+            try:
+                path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def close(self) -> None:
         for fh in (self._fh, self._log_fh):
@@ -263,7 +276,12 @@ class MetricAccumulator:
         for ev in events:
             t = ev.get("type")
             if t == E.EPOCH_END:
-                self.epochs.append(self._flatten_epoch(ev))
+                row = self._flatten_epoch(ev)
+                # A resumed run repeats any epoch finished after its last resume
+                # checkpoint; the repeat replaces the earlier rows.
+                while self.epochs and (self.epochs[-1].get("epoch") or 0) >= (row["epoch"] or 0):
+                    self.epochs.pop()
+                self.epochs.append(row)
             elif t == E.BATCH:
                 self.last_batch = ev
                 self.batches.append(ev)

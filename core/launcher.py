@@ -20,7 +20,7 @@ from pathlib import Path
 
 from core.events import _atomic_write, read_state
 from core.hardware import environment_snapshot
-from core.runs import process_alive
+from core.runs import load_summary, process_alive, resume_info
 from core.schemas import Layout, RunConfig, RunStatus
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -95,8 +95,41 @@ def start_run(cfg: RunConfig, overwrite: bool = False,
         raise LaunchError(f"runner.py not found: {RUNNER}")
 
     run_dir = prepare_run_dir(cfg, overwrite=overwrite)
+    return _spawn(run_dir, cfg, [], python_exe)
+
+
+def resume_run(run_dir: str | Path, python_exe: str | None = None) -> Launched:
+    """Continue a stopped or failed run in place, from checkpoints/resume.pt.
+
+    Nothing in the run directory is cleared: the new session appends to the same
+    event stream and log, and rewrites the metrics and report when it ends.
+    """
+    run_dir = Path(run_dir)
+    summary = load_summary(run_dir)
+    if summary is None or summary.config is None:
+        raise LaunchError(f"`{run_dir}` is not a run directory with a readable config.json.")
+    ok, reason, _ = resume_info(summary)
+    if not ok:
+        raise LaunchError(reason)
+
+    for signal in (Layout.STOP, Layout.PAUSE):
+        (run_dir / signal).unlink(missing_ok=True)
+    st = read_state(run_dir)
+    now = time.time()
+    # The waiting time until the trainer starts must not count as training time
+    st.update(status=RunStatus.QUEUED.value, pid=None, error=None,
+              resumes=int(st.get("resumes") or 0) + 1,
+              elapsed_before=summary.duration_s or 0.0, started_at=now, updated_at=now)
+    _atomic_write(run_dir / Layout.STATE, json.dumps(st, indent=2))
+    return _spawn(run_dir, summary.config, ["--resume"], python_exe)
+
+
+def _spawn(run_dir: Path, cfg: RunConfig, extra: list[str],
+           python_exe: str | None = None) -> Launched:
+    if not RUNNER.is_file():
+        raise LaunchError(f"runner.py not found: {RUNNER}")
     cmd = [python_exe or python_executable(), str(RUNNER),
-           "--config", str(run_dir / Layout.CONFIG)]
+           "--config", str(run_dir / Layout.CONFIG), *extra]
 
     env = os.environ.copy()
     # Let the child process import the project
@@ -163,6 +196,23 @@ def request_stop(run_dir: str | Path) -> bool:
 
 def stop_requested(run_dir: str | Path) -> bool:
     return (Path(run_dir) / Layout.STOP).exists()
+
+
+def request_pause(run_dir: str | Path) -> bool:
+    """Stop at the end of the current epoch, once its resume checkpoint is written."""
+    try:
+        (Path(run_dir) / Layout.PAUSE).write_text(str(time.time()), encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def cancel_pause(run_dir: str | Path) -> None:
+    (Path(run_dir) / Layout.PAUSE).unlink(missing_ok=True)
+
+
+def pause_requested(run_dir: str | Path) -> bool:
+    return (Path(run_dir) / Layout.PAUSE).exists()
 
 
 def clear_stop(run_dir: str | Path) -> None:

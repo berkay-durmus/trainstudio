@@ -403,9 +403,11 @@ class Layout:
     LOG = "train.log"
     SPLITS = "splits.json"
     STOP = "STOP"
+    PAUSE = "PAUSE"
     CHECKPOINTS = "checkpoints"
     BEST = "checkpoints/best.pt"
     LAST = "checkpoints/last.pt"
+    RESUME = "checkpoints/resume.pt"      # the full training state at the last epoch boundary
     METRICS_DIR = "metrics"
     METRICS_CSV = "metrics/metrics.csv"
     METRICS_XLSX = "metrics/metrics.xlsx"

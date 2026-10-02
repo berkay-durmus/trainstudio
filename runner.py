@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The entry point of the training process.
 
-    python runner.py --config <run_dir>/config.json
+    python runner.py --config <run_dir>/config.json [--resume]
 
 The UI starts this script as a separate process, but the script does not depend
 on the UI: the same command can be run on a server, in CI or under `nohup` and
@@ -78,6 +78,8 @@ def build_trainer(cfg: RunConfig, writer: EventWriter):
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="The TrainStudio training process")
     ap.add_argument("--config", required=True, help="path to config.json in the run directory")
+    ap.add_argument("--resume", action="store_true",
+                    help="continue from checkpoints/resume.pt instead of starting over")
     args = ap.parse_args(argv)
 
     config_path = Path(args.config).expanduser().resolve()
@@ -96,16 +98,20 @@ def main(argv: list[str] | None = None) -> int:
     # right place even if the user has moved the folder.
     run_dir = config_path.parent
     writer = EventWriter(run_dir)
-    writer.clear_stop()
+    # A leftover STOP would end the run at once. A PAUSE is left alone: it may be
+    # a request made while this process was starting (the launcher clears stale ones).
+    writer.clear_stop(pause=False)
 
     status = RunStatus.FAILED
     try:
         writer.update_state(pid=os.getpid(), run_name=cfg.run_name)
-        writer.log(f"TrainStudio {__version__} · run `{cfg.run_name}` · PID {os.getpid()}")
+        writer.log(f"TrainStudio {__version__} · run `{cfg.run_name}` · PID {os.getpid()}"
+                   + (" · resuming" if args.resume else ""))
         writer.log(f"Model {cfg.model.display_name or cfg.model.arch} "
                    f"({cfg.model.backend.value}) · task {cfg.dataset.task.value}")
 
         trainer = build_trainer(cfg, writer)
+        trainer.resume = args.resume
         status = trainer.fit()
 
     except Exception as exc:

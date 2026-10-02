@@ -75,6 +75,8 @@ class UltralyticsTrainer:
         self._epoch_started = 0.0
         self._last_system = 0.0
         self._stopped = False
+        self._paused = False
+        self.resume = False             # set by runner.py --resume
         self._monitor = cfg.hp.monitor_metric
         self._mode = metric_mode(self._monitor)
 
@@ -119,6 +121,7 @@ class UltralyticsTrainer:
         model.add_callback("on_train_start", self._on_train_start)
         model.add_callback("on_train_epoch_start", self._on_epoch_start)
         model.add_callback("on_train_batch_end", self._on_batch_end)
+        model.add_callback("on_model_save", self._on_model_save)
         model.add_callback("on_fit_epoch_end", self._on_fit_epoch_end)
         model.add_callback("on_train_end", self._on_train_end)
 
@@ -132,12 +135,14 @@ class UltralyticsTrainer:
         self.w.emit(E.EPOCH_START, epoch=self.epoch, total_epochs=self.hp.epochs)
 
     def _on_batch_end(self, trainer) -> None:
-        # We catch the stop signal here: Ultralytics reads its `stop` flag at the
-        # end of an epoch, so it exits with at most one epoch of delay.
+        # Ultralytics breaks out of the epoch on its `stop` flag after this batch,
+        # then still validates and saves the shortened epoch — which therefore must
+        # not become the resume point.
         if self.w.stop_requested() and not trainer.stop:
             trainer.stop = True
             self._stopped = True
-            self.w.log("A stop was requested — Ultralytics will halt at the end of this epoch.")
+            self.w.log("A stop was requested — Ultralytics halts after this batch and "
+                       "validates once more.")
 
         step = int(getattr(trainer, "_ts_step", 0)) + 1
         trainer._ts_step = step
@@ -163,6 +168,21 @@ class UltralyticsTrainer:
         if now - self._last_system >= 5.0:
             self._last_system = now
             self.w.emit(E.SYSTEM, **telemetry())
+
+    def _on_model_save(self, trainer) -> None:
+        """Keep a resumable copy: at the end of training Ultralytics strips the
+        optimizer out of its own last.pt, after which it can no longer resume."""
+        if self._stopped:
+            return
+        try:
+            dst = self.cfg.path(Layout.RESUME)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            tmp = dst.with_suffix(".tmp")
+            shutil.copy2(trainer.last, tmp)
+            tmp.replace(dst)
+            self.w.update_state(resume_epoch=self.epoch)
+        except Exception as exc:
+            self.w.log(f"Could not keep a resume checkpoint: {exc}", "warning")
 
     def _on_fit_epoch_end(self, trainer) -> None:
         trainer._ts_step = 0
@@ -202,6 +222,12 @@ class UltralyticsTrainer:
                    f"val[{fmt}]" + (" ★" if improved else ""))
         self._write_metrics()
         self._copy_artifacts(trainer)
+
+        if (self.w.pause_requested() and not trainer.stop and not self._paused
+                and self.epoch < self.hp.epochs):
+            trainer.stop = True            # read straight after this callback
+            self._paused = True
+            self.w.log(f"Paused after epoch {self.epoch}; resume it from the Training page.")
 
     def _on_train_end(self, trainer) -> None:
         self._copy_artifacts(trainer, final=True)
@@ -287,11 +313,15 @@ class UltralyticsTrainer:
         status = RunStatus.COMPLETED
         error: str | None = None
         started = time.time()
+        prior = 0.0
 
         try:
+            if self.resume:
+                prior = self._restore_resume()
             self.w.update_state(status=RunStatus.RUNNING.value, pid=os.getpid(),
                                 run_name=self.cfg.run_name, total_epochs=self.hp.epochs,
-                                monitor_metric=self._monitor, started_at=started, epoch=0)
+                                monitor_metric=self._monitor, started_at=started,
+                                elapsed_before=prior, epoch=self.epoch)
 
             data_arg = convert_yolo.prepare(self.ds, self.cfg.model.arch, self.w.log)
             if "-seg" in self.cfg.model.arch.lower() and self.ds.task == Task.SEGMENTATION:
@@ -304,7 +334,9 @@ class UltralyticsTrainer:
 
             weights = self.cfg.model.arch
             yaml_name = weights.replace(".pt", ".yaml")
-            if not self.hp.pretrained:
+            if self.resume:
+                self.model = YOLO(str(self.cfg.path(Layout.RESUME)))
+            elif not self.hp.pretrained:
                 # A .pt always carries its pretrained weights, whatever train() is told
                 self.w.log(f"Training from scratch: building `{yaml_name}`.")
                 self.model = YOLO(yaml_name)
@@ -319,6 +351,7 @@ class UltralyticsTrainer:
 
             self._register(self.model)
             self.w.emit(E.RUN_START, run_name=self.cfg.run_name,
+                        resumed_from=self.epoch if self.resume else None,
                         total_epochs=self.hp.epochs,
                         model=self.cfg.model.display_name or self.cfg.model.arch,
                         task=self.ds.task.value, monitor_metric=self._monitor,
@@ -365,11 +398,16 @@ class UltralyticsTrainer:
             reg = model_kwargs(self.cfg)            # dropout, classification only
             args.update(reg)
             log_applied(self.cfg, self.w, reg)
-            self.w.log(f"Ultralytics settings: epochs={args['epochs']} imgsz={args['imgsz']} "
-                       f"batch={args['batch']} device={args['device']}")
+            if self.resume:
+                # Everything else comes back from the checkpoint's own train_args
+                args = {k: args[k] for k in ("data", "device", "workers")}
+                args["resume"] = True
+            else:
+                self.w.log(f"Ultralytics settings: epochs={args['epochs']} imgsz={args['imgsz']} "
+                           f"batch={args['batch']} device={args['device']}")
             self.model.train(**args)
 
-            if self._stopped or self.w.stop_requested():
+            if self._stopped or self._paused or self.w.stop_requested():
                 status = RunStatus.STOPPED
 
         except KeyboardInterrupt:
@@ -384,7 +422,10 @@ class UltralyticsTrainer:
 
         finally:
             self.w.clear_stop()
-            duration = time.time() - started
+            duration = prior + time.time() - started
+            if status == RunStatus.COMPLETED:
+                self.cfg.path(Layout.RESUME).unlink(missing_ok=True)
+                self.w.update_state(resume_epoch=None)
             try:
                 self._finalize(status)
             except Exception as exc:
@@ -396,6 +437,28 @@ class UltralyticsTrainer:
                                 best_value=self.best_value, best_epoch=self.best_epoch,
                                 duration_s=duration)
         return status
+
+    def _restore_resume(self) -> float:
+        """What our side keeps of the run: the epoch table, the best value and
+        the elapsed time. Ultralytics restores its own state from resume.pt."""
+        import pandas as pd
+
+        if not self.cfg.path(Layout.RESUME).is_file():
+            raise RuntimeError("There is no resume checkpoint (checkpoints/resume.pt) to continue from.")
+        st = self.w.state
+        self.epoch = int(st.get("resume_epoch") or 0)
+        csv = self.cfg.path(Layout.METRICS_CSV)
+        if csv.is_file():
+            rows = pd.read_csv(csv).to_dict("records")
+            self.history = [r for r in rows if r.get("epoch", 0) <= self.epoch]
+        self._monitor = st.get("monitor_metric") or self._monitor
+        self._mode = metric_mode(self._monitor)
+        best = [r for r in self.history if r.get("best")]
+        if best:
+            self.best_epoch = int(best[-1]["epoch"])
+            self.best_value = best[-1].get(f"val_{self._monitor}")
+        self.w.log(f"Resumed after epoch {self.epoch} of {self.hp.epochs}")
+        return float(st.get("elapsed_before") or 0.0)
 
     def _finalize(self, status: RunStatus) -> None:
         import pandas as pd
