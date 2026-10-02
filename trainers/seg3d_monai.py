@@ -86,10 +86,9 @@ class MonaiSegmentation3DTrainer(BaseTrainer):
         for split, dataset in self.datasets.items():
             is_train = split == "train"
             self.loaders[split] = DataLoader(
-                dataset,
+                **self.loader_source(split, dataset),
                 # Full volumes have different sizes at validation time; batch 1 is required
                 batch_size=self.hp.batch_size if is_train else 1,
-                shuffle=is_train,
                 num_workers=self.hp.num_workers,
                 collate_fn=list_data_collate,
                 pin_memory=self.device.type == "cuda",

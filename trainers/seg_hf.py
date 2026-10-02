@@ -85,9 +85,8 @@ class HfSegmentationTrainer(BaseTrainer):
         pin = self.device.type == "cuda"
         for split, dataset in self.datasets.items():
             self.loaders[split] = DataLoader(
-                dataset,
+                **self.loader_source(split, dataset),
                 batch_size=self.hp.batch_size,
-                shuffle=(split == "train"),
                 num_workers=self.hp.num_workers,
                 pin_memory=pin,
                 drop_last=(split == "train" and len(dataset) > self.hp.batch_size),

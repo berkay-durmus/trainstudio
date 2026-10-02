@@ -24,6 +24,7 @@ from torch.utils.data import DataLoader
 from core.events import E, EventWriter
 from core.hardware import detect, telemetry
 from core.schemas import Hyperparams, Layout, RunConfig, RunStatus, Task, metric_mode
+from data.seeding import SeededDataset, SeededSampler
 
 SYSTEM_EVENT_INTERVAL_S = 5.0
 BATCH_EVENT_MIN_INTERVAL_S = 0.25
@@ -231,6 +232,15 @@ class BaseTrainer(ABC):
     def save_preview(self, epoch: int, metrics) -> str | None:
         """Produce a preview image from validation samples (optional)."""
         return None
+
+    @staticmethod
+    def loader_source(split: str, dataset) -> dict:
+        """The DataLoader arguments that choose the samples. The training split goes
+        through a seeded sampler, so its order and augmentation follow `hp.seed` and
+        survive a resume (data/seeding.py); the other splits are read in order."""
+        if split != "train":
+            return {"dataset": dataset, "shuffle": False}
+        return {"dataset": SeededDataset(dataset), "sampler": SeededSampler(len(dataset))}
 
     def n_classes(self) -> int:
         return max(2, self.ds.num_classes)
