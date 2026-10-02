@@ -1,7 +1,9 @@
 # ── UI ────────────────────────────────────────────────────────────────
-# 1.50 is a hard floor, not a preference: the pages use the `width="stretch"`
-# element API, which older releases reject with a TypeError on every widget.
-streamlit>=1.50
+# The pages need 1.50 for the `width="stretch"` element API, which older
+# releases reject with a TypeError on every widget. The floor is 1.60 because
+# that is the oldest release the AppTest suite runs on: before it, AppTest's
+# element tree crashes on the Inference page (AttributeError: _widget_state).
+streamlit>=1.60
 plotly>=5.22
 pandas>=2.2
 numpy>=1.26,<3

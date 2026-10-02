@@ -50,7 +50,7 @@ expected = {
     Task.SEGMENTATION3D: {"MONAI"},
 }
 for task, want in expected.items():
-    at = seeded("pages/2_Model_Selection.py", **{st_keys.K_DATASET: ds(task)})
+    at = seeded("views/2_Model_Selection.py", **{st_keys.K_DATASET: ds(task)})
     if at.exception:
         record("modelsel", f"{task.value} page renders", False,
                f"{[e.value for e in at.exception][:1]}")
@@ -64,7 +64,7 @@ for task, want in expected.items():
 
 # ══ 2 · torchvision models are actually listed and selectable ══════════════
 print("\n2 · torchvision models appear and can be chosen")
-at = seeded("pages/2_Model_Selection.py", **{st_keys.K_DATASET: ds(Task.CLASSIFICATION)})
+at = seeded("views/2_Model_Selection.py", **{st_keys.K_DATASET: ds(Task.CLASSIFICATION)})
 txt = blob(at)
 tv_cls = [s for s in MODEL_REGISTRY
           if s.backend.value == "torchvision" and s.task == Task.CLASSIFICATION]
@@ -73,7 +73,7 @@ record("modelsel", "every torchvision classifier is on the page", not missing,
        f"missing={missing}")
 
 # filter down to torchvision only and count the cards
-at2 = seeded("pages/2_Model_Selection.py",
+at2 = seeded("views/2_Model_Selection.py",
              **{st_keys.K_DATASET: ds(Task.CLASSIFICATION)})
 ms = [m for m in at2.multiselect if (m.label or "") == "Library"][0]
 at3 = ms.set_value(["torchvision"]).run()
@@ -101,7 +101,7 @@ else:
 
 # ══ 3 · The Advanced picker offers both libraries ═══════════════════════════
 print("\n3 · Advanced picker — timm and torchvision")
-at = seeded("pages/2_Model_Selection.py", **{st_keys.K_DATASET: ds(Task.CLASSIFICATION)})
+at = seeded("views/2_Model_Selection.py", **{st_keys.K_DATASET: ds(Task.CLASSIFICATION)})
 radios = {(r.label or ""): list(r.options) for r in at.radio}
 record("advanced", "the library radio offers both",
        radios.get("Library") == ["timm", "torchvision"], f"{radios}")
@@ -121,7 +121,7 @@ if lib_radio:
 
 # ══ 4 · Filters ════════════════════════════════════════════════════════════
 print("\n4 · Filters narrow the catalogue")
-at = seeded("pages/2_Model_Selection.py", **{st_keys.K_DATASET: ds(Task.CLASSIFICATION)})
+at = seeded("views/2_Model_Selection.py", **{st_keys.K_DATASET: ds(Task.CLASSIFICATION)})
 base_cards = blob(at).count("select")
 ti = [t for t in at.text_input if "Search" in (t.label or "") or t.placeholder]
 if ti:
@@ -150,7 +150,7 @@ ultra = next(s for s in MODEL_REGISTRY
              if s.backend.value == "ultralytics" and s.task == Task.CLASSIFICATION)
 for lib, spec_id, task, loss_enabled, wants_encoder in cases:
     spec = get(spec_id) if spec_id else ultra
-    at = seeded("pages/3_Settings.py",
+    at = seeded("views/3_Settings.py",
                 **{st_keys.K_DATASET: ds(task), st_keys.K_SPEC: spec})
     if at.exception:
         record("settings", f"{lib}/{spec.id} renders", False,
@@ -167,7 +167,7 @@ for lib, spec_id, task, loss_enabled, wants_encoder in cases:
 
 # ══ 6 · Settings: config preview and run-name validation ═══════════════════
 print("\n6 · Settings — config preview and run name")
-at = seeded("pages/3_Settings.py",
+at = seeded("views/3_Settings.py",
             **{st_keys.K_DATASET: ds(Task.CLASSIFICATION), st_keys.K_SPEC: get("tv_resnet18")})
 record("settings", "no error building the config preview",
        not any("configuration is invalid" in e for e in messages(at, "error")),
@@ -182,14 +182,15 @@ else:
 
 # ══ 7 · Training page ══════════════════════════════════════════════════════
 print("\n7 · Training page")
-at = seeded("pages/4_Training.py", **{st_keys.K_DATASET: ds(Task.CLASSIFICATION),
+at = seeded("views/4_Training.py", **{st_keys.K_DATASET: ds(Task.CLASSIFICATION),
                                       st_keys.K_SPEC: get("tv_resnet18")})
 # With no run to watch the page sends the user back to Settings; st.switch_page
-# cannot resolve a target when a page is run outside st.navigation.
+# cannot resolve a target when a page is run outside st.navigation. Before
+# Streamlit 1.63 the same case surfaces as a KeyError on 'url_pathname'.
 _excs = [e.value for e in at.exception]
 record("training", "renders with no active run (or redirects to Settings)",
-       not _excs or all("Could not find page" in e for e in _excs), f"{_excs[:1]}")
-at = seeded("pages/4_Training.py",
+       all("Could not find page" in e or "url_pathname" in e for e in _excs), f"{_excs[:1]}")
+at = seeded("views/4_Training.py",
             **{st_keys.K_DATASET: ds(Task.CLASSIFICATION), st_keys.K_SPEC: get("tv_resnet18"),
                st_keys.K_ACTIVE_RUN: os.path.join(RUNS, "tv-cls")})
 record("training", "renders a finished run", not at.exception,
@@ -199,20 +200,20 @@ record("training", "the finished run is described",
 
 # ══ 8 · Results page ═══════════════════════════════════════════════════════
 print("\n8 · Results page")
-at = seeded("pages/5_Results.py", **{st_keys.K_OUTPUT: RUNS})
+at = seeded("views/5_Results.py", **{st_keys.K_OUTPUT: RUNS})
 record("results", "renders", not at.exception, f"{[e.value for e in at.exception][:1]}")
 t = blob(at)
 record("results", "both finished runs are listed",
        "tv-cls" in t and "tv-seg" in t, "")
 record("results", "the table carries model, metric and duration",
        all(k in t for k in ("resnet-18", "lr-aspp", "balanced_accuracy", "completed")), "")
-at_empty = seeded("pages/5_Results.py", **{st_keys.K_OUTPUT: os.path.join(T, "edge_empty")})
+at_empty = seeded("views/5_Results.py", **{st_keys.K_OUTPUT: os.path.join(T, "edge_empty")})
 record("results", "an empty output folder shows an empty state",
        "no results" in blob(at_empty).lower(), "")
 
 # ══ 9 · Inference page ═════════════════════════════════════════════════════
 print("\n9 · Inference page")
-at = seeded("pages/6_Inference.py", **{st_keys.K_OUTPUT: RUNS,
+at = seeded("views/6_Inference.py", **{st_keys.K_OUTPUT: RUNS,
                                        st_keys.K_ACTIVE_RUN: os.path.join(RUNS, "tv-cls")})
 record("inference", "renders with a torchvision checkpoint", not at.exception,
        f"{[e.value for e in at.exception][:1]}")
@@ -221,11 +222,11 @@ record("inference", "the model loaded (no load error)",
        not any("could not be loaded" in e for e in messages(at, "error")),
        f"{[e for e in messages(at,'error')][:1]}")
 record("inference", "classification is reported", "classification" in t, "")
-at_seg = seeded("pages/6_Inference.py", **{st_keys.K_OUTPUT: RUNS,
+at_seg = seeded("views/6_Inference.py", **{st_keys.K_OUTPUT: RUNS,
                                            st_keys.K_ACTIVE_RUN: os.path.join(RUNS, "tv-seg")})
 record("inference", "renders a segmentation checkpoint", not at_seg.exception,
        f"{[e.value for e in at_seg.exception][:1]}")
-at_none = seeded("pages/6_Inference.py", **{st_keys.K_OUTPUT: os.path.join(T, "edge_empty")})
+at_none = seeded("views/6_Inference.py", **{st_keys.K_OUTPUT: os.path.join(T, "edge_empty")})
 record("inference", "no checkpoints shows an empty state",
        "no usable model" in blob(at_none).lower(), "")
 
@@ -233,7 +234,7 @@ record("inference", "no checkpoints shows an empty state",
 print("\n10 · Settings — 3D, Ultralytics segmentation, and a split dataset")
 # MONAI, i.e. the 3D path with its patch-size settings
 monai = next(s for s in MODEL_REGISTRY if s.backend.value == "monai")
-at = seeded("pages/3_Settings.py",
+at = seeded("views/3_Settings.py",
             **{st_keys.K_DATASET: ds(Task.SEGMENTATION3D), st_keys.K_SPEC: monai})
 record("settings3d", f"MONAI ({monai.id}) renders", not at.exception,
        f"{[e.value for e in at.exception][:1]}")
@@ -244,7 +245,7 @@ record("settings3d", "the config preview is valid",
 # Ultralytics on segmentation — its own loss, so ours must be disabled
 useg = next(s for s in MODEL_REGISTRY
             if s.backend.value == "ultralytics" and s.task == Task.SEGMENTATION)
-at = seeded("pages/3_Settings.py",
+at = seeded("views/3_Settings.py",
             **{st_keys.K_DATASET: ds(Task.SEGMENTATION), st_keys.K_SPEC: useg})
 record("settings3d", f"Ultralytics segmentation ({useg.id}) renders", not at.exception,
        f"{[e.value for e in at.exception][:1]}")
@@ -254,7 +255,7 @@ record("settings3d", "its own loss is used, ours is disabled",
 # a dataset that was split automatically must carry splits.json into the config
 split_ds = ds(Task.CLASSIFICATION)
 split_ds.splits_file = os.path.join(split_ds.root, "splits.json")
-at = seeded("pages/3_Settings.py",
+at = seeded("views/3_Settings.py",
             **{st_keys.K_DATASET: split_ds, st_keys.K_SPEC: get("tv_resnet18")})
 record("settings3d", "a split dataset renders", not at.exception,
        f"{[e.value for e in at.exception][:1]}")

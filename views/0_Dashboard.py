@@ -30,13 +30,18 @@ page_header("Dashboard", "System status, a summary of the flow and recent runs")
 dev = detect()
 tel = telemetry()
 
+# Training runs in its own process, so only a device-wide reading means anything
+# here: the torch allocator figures telemetry() falls back to count this process
+# alone and always read 0. NVML (which also reports gpu_pct) is device-wide; MPS
+# memory is the system RAM, whose usage has its own card.
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Compute device", {"cuda": "NVIDIA GPU", "mps": "Apple GPU", "cpu": "CPU"}[dev.kind])
 c2.metric(
     "Memory",
     f"{dev.total_memory_gb:.0f} GB",
-    f"{tel['gpu_mem_used_gb']:.1f} GB in use" if "gpu_mem_used_gb" in tel else None,
+    f"{tel['gpu_mem_used_gb']:.1f} GB in use" if dev.kind == "cuda" and "gpu_pct" in tel else None,
     delta_color="off",
+    help="Unified memory, shared with the system RAM" if dev.kind == "mps" else None,
 )
 c3.metric("Models in the catalogue", len(MODEL_REGISTRY))
 c4.metric("RAM usage", f"{tel.get('ram_pct', 0):.0f}%" if tel else "—")
@@ -87,7 +92,7 @@ with s1:
         dim(f"{ds.task.label} · {ds.n_total:,} samples · {ds.num_classes} classes")
     else:
         st.info("**1 · Dataset**\n\nNot selected yet")
-    st.page_link("pages/1_Dataset.py", label="Dataset", icon="📁", width="stretch")
+    st.page_link("views/1_Dataset.py", label="Dataset", icon="📁", width="stretch")
 
 with s2:
     if spec:
@@ -95,7 +100,7 @@ with s2:
         dim(f"{spec.family} · {spec.params_label} parameters · {spec.released}")
     else:
         st.info("**2 · Model**\n\nNot selected yet")
-    st.page_link("pages/2_Model_Selection.py", label="Model Selection", icon="🧠",
+    st.page_link("views/2_Model_Selection.py", label="Model Selection", icon="🧠",
                  width="stretch", disabled=ds is None)
 
 with s3:
@@ -104,7 +109,7 @@ with s3:
         dim(f"{hp.epochs} epochs · batch {hp.batch_size} · lr {hp.lr:.1e}")
     else:
         st.info("**3 · Settings**\n\nNot configured yet")
-    st.page_link("pages/3_Settings.py", label="Settings", icon="⚙️",
+    st.page_link("views/3_Settings.py", label="Settings", icon="⚙️",
                  width="stretch", disabled=not state.ready_to_configure())
 
 with s4:
@@ -119,7 +124,7 @@ with s4:
             st.info("**4 · Training**\n\nRun not found")
     else:
         st.info("**4 · Training**\n\nNot started")
-    st.page_link("pages/4_Training.py", label="Training", icon="🚀",
+    st.page_link("views/4_Training.py", label="Training", icon="🚀",
                  width="stretch", disabled=hp is None and active is None)
 
 st.divider()
@@ -169,10 +174,10 @@ else:
             with e:
                 if st.button("Open", key=f"open_{r.run_dir}", width="stretch"):
                     state.put(state.K_ACTIVE_RUN, r.run_dir)
-                    st.switch_page("pages/4_Training.py")
+                    st.switch_page("views/4_Training.py")
             if r.total_epochs:
                 st.progress(r.progress)
             if r.error and r.status == RunStatus.FAILED:
                 st.caption(f"🛑 {r.error[:180]}")
 
-    st.page_link("pages/5_Results.py", label="Compare all results", icon="📊")
+    st.page_link("views/5_Results.py", label="Compare all results", icon="📊")

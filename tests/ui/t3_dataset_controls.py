@@ -3,7 +3,7 @@ import os, sys, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harness import T, dp, record, run_page, blob, messages, summary, ss_get
 
-PAGE = "pages/1_Dataset.py"
+PAGE = "views/1_Dataset.py"
 CT   = os.path.join(T, "extra", "cls_ct_dicom")
 CLS  = os.path.join(T, "ts_data", "cls_shapes")
 SEG  = os.path.join(T, "ts_data", "seg_shapes")

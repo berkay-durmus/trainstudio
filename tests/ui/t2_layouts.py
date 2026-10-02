@@ -3,7 +3,7 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harness import T, dp, record, run_page, blob, messages, summary, ss_get
 
-PAGE = "pages/1_Dataset.py"
+PAGE = "views/1_Dataset.py"
 
 def open_with(path):
     return run_page(PAGE, lambda a: a.session_state.__setitem__(

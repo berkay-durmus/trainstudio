@@ -48,7 +48,7 @@ if not active:
     empty_state("🚀", "There is no run to watch",
                 f"Searched in: {state.output_dir()}",
                 "Start a run from the Settings page.")
-    st.page_link("pages/3_Settings.py", label="→ Settings", icon="⚙️")
+    st.page_link("views/3_Settings.py", label="→ Settings", icon="⚙️")
     st.stop()
 
 if len(all_runs) > 1:
@@ -282,7 +282,7 @@ with c:
         st.caption(f"best.pt · {size:.1f} MB")
 with d:
     if st.button("📊 Compare in Results", width="stretch"):
-        st.switch_page("pages/5_Results.py")
+        st.switch_page("views/5_Results.py")
 
 if cfg is not None:
     with st.expander("⚙️ This run's configuration"):

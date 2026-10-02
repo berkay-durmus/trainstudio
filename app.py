@@ -24,20 +24,25 @@ from ui.theme import inject_theme                # noqa: E402
 inject_theme()
 brand_sidebar()
 
+# The page scripts live in views/, not pages/. Streamlit auto-discovers a pages/
+# folder, and on a freshly started server whose first request is a deep link
+# (a browser tab reconnecting to /Training, say) it then runs that page on its
+# own, skipping this file — the theme and this navigation are lost for every
+# session until someone happens to open the root URL.
 PAGES = {
     "": [
-        st.Page("pages/0_Dashboard.py", title="Dashboard",
+        st.Page("views/0_Dashboard.py", title="Dashboard",
                 icon=":material/space_dashboard:", default=True),
     ],
     "Training flow": [
-        st.Page("pages/1_Dataset.py", title="Dataset", icon=":material/folder_open:"),
-        st.Page("pages/2_Model_Selection.py", title="Model Selection", icon=":material/neurology:"),
-        st.Page("pages/3_Settings.py", title="Settings", icon=":material/tune:"),
-        st.Page("pages/4_Training.py", title="Training", icon=":material/play_circle:"),
+        st.Page("views/1_Dataset.py", title="Dataset", icon=":material/folder_open:"),
+        st.Page("views/2_Model_Selection.py", title="Model Selection", icon=":material/neurology:"),
+        st.Page("views/3_Settings.py", title="Settings", icon=":material/tune:"),
+        st.Page("views/4_Training.py", title="Training", icon=":material/play_circle:"),
     ],
     "Outputs": [
-        st.Page("pages/5_Results.py", title="Results", icon=":material/bar_chart:"),
-        st.Page("pages/6_Inference.py", title="Inference & Export", icon=":material/science:"),
+        st.Page("views/5_Results.py", title="Results", icon=":material/bar_chart:"),
+        st.Page("views/6_Inference.py", title="Inference & Export", icon=":material/science:"),
     ],
 }
 

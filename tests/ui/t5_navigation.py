@@ -10,9 +10,9 @@ import ui.state as K
 
 RUNS = os.path.join(T, "e2e", "runs")
 CLS  = os.path.join(T, "ts_data", "cls_shapes")
-PAGES = ["pages/0_Dashboard.py", "pages/1_Dataset.py", "pages/2_Model_Selection.py",
-         "pages/3_Settings.py", "pages/4_Training.py", "pages/5_Results.py",
-         "pages/6_Inference.py"]
+PAGES = ["views/0_Dashboard.py", "views/1_Dataset.py", "views/2_Model_Selection.py",
+         "views/3_Settings.py", "views/4_Training.py", "views/5_Results.py",
+         "views/6_Inference.py"]
 
 def ds_cls():
     return DatasetConfig(root=CLS, task=Task.CLASSIFICATION, modality=Modality.RGB,
@@ -25,6 +25,14 @@ def app(seed=None, timeout=240):
     if seed:
         seed(at)
     return at
+
+# ══ 0 · No folder Streamlit would auto-discover ════════════════════════════
+# AppTest cannot show this one: on a cold server whose first request is a deep
+# link, a pages/ folder makes Streamlit run the page without app.py, so the theme
+# and the grouped navigation are lost for every session.
+print("\n0 · Page scripts stay out of an auto-discovered pages/ folder")
+record("nav", "there is no pages/ folder next to app.py",
+       not os.path.isdir(os.path.join(PROJ, "pages")))
 
 # ══ 1 · The entrypoint and every page in the real navigation ═══════════════
 print("\n1 · Every page renders inside st.navigation")
@@ -44,8 +52,8 @@ for page in PAGES:
 
 # ══ 2 · The unguarded pages redirect instead of crashing ═══════════════════
 print("\n2 · With no dataset, the flow pages send you to step 1")
-for page, want in (("pages/2_Model_Selection.py", "select and validate a dataset first"),
-                   ("pages/3_Settings.py", "select and validate a dataset first")):
+for page, want in (("views/2_Model_Selection.py", "select and validate a dataset first"),
+                   ("views/3_Settings.py", "select and validate a dataset first")):
     a = app().run().switch_page(page).run()
     excs = [e.value for e in a.exception]
     warns = " ".join(messages(a, "warning")).lower()
@@ -54,7 +62,7 @@ for page, want in (("pages/2_Model_Selection.py", "select and validate a dataset
 
 # ══ 3 · A full walk-through in one session ═════════════════════════════════
 print("\n3 · Dataset → Model Selection → Settings, as a user would")
-a = app().run().switch_page("pages/1_Dataset.py").run()
+a = app().run().switch_page("views/1_Dataset.py").run()
 a.session_state[dp("dataset", "selected")] = CLS
 a = a.run()
 record("walk", "step 1: the dataset validates",
@@ -70,7 +78,7 @@ if cont:
            f"root={getattr(ss_get(a, K.K_DATASET), 'root', None)}")
     # AppTest keeps running the page it was last pointed at, so the navigation
     # a browser performs on st.switch_page has to be restated here.
-    a = a.switch_page("pages/2_Model_Selection.py").run()
+    a = a.switch_page("views/2_Model_Selection.py").run()
     record("walk", "step 2: Model Selection renders, no error",
            not a.exception, f"{[e.value for e in a.exception][:1]}")
     record("walk", "step 2: the catalogue is shown for this task",
@@ -87,7 +95,7 @@ if cont:
         record("walk", "step 2: the page stays on the catalogue after selecting",
                "newest first" in blob(a) and not a.exception,
                f"{[e.value for e in a.exception][:1]}")
-        a = a.switch_page("pages/3_Settings.py").run()
+        a = a.switch_page("views/3_Settings.py").run()
         record("walk", "step 3: Settings renders for the chosen model",
                not a.exception, f"{[e.value for e in a.exception][:1]}")
         record("walk", "step 3: the config preview is valid",

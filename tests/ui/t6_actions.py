@@ -20,7 +20,7 @@ def page(p, **kw):
 
 # ══ 1 · Inference — a real prediction from the dataset ═════════════════════
 print("\n1 · Inference: predict on a dataset sample")
-at = page("pages/6_Inference.py", **{K.K_OUTPUT: RUNS, K.K_ACTIVE_RUN: CLSRUN})
+at = page("views/6_Inference.py", **{K.K_OUTPUT: RUNS, K.K_ACTIVE_RUN: CLSRUN})
 record("infer", "the page loads the classification model", not at.exception,
        f"{[e.value for e in at.exception][:1]}")
 
@@ -54,7 +54,7 @@ if radios:
 
 # ══ 2 · Inference — segmentation prediction ════════════════════════════════
 print("\n2 · Inference: segmentation")
-at = page("pages/6_Inference.py", **{K.K_OUTPUT: RUNS, K.K_ACTIVE_RUN: SEGRUN})
+at = page("views/6_Inference.py", **{K.K_OUTPUT: RUNS, K.K_ACTIVE_RUN: SEGRUN})
 radios = [r for r in at.radio if "source" in (r.label or "").lower()]
 if radios:
     at2 = radios[0].set_value("Pick from the dataset").run()
@@ -74,7 +74,7 @@ if radios:
 
 # ══ 3 · Export tab ═════════════════════════════════════════════════════════
 print("\n3 · Export")
-at = page("pages/6_Inference.py", **{K.K_OUTPUT: RUNS, K.K_ACTIVE_RUN: CLSRUN})
+at = page("views/6_Inference.py", **{K.K_OUTPUT: RUNS, K.K_ACTIVE_RUN: CLSRUN})
 exp = [b for b in at.button if b.label and "Produce" in b.label]
 record("export", "export buttons are offered", len(exp) >= 1,
        f"{[b.label for b in exp]}")
@@ -91,7 +91,7 @@ else:
 
 # ══ 4 · Batch inference ════════════════════════════════════════════════════
 print("\n4 · Batch inference tab")
-at = page("pages/6_Inference.py", **{K.K_OUTPUT: RUNS, K.K_ACTIVE_RUN: CLSRUN})
+at = page("views/6_Inference.py", **{K.K_OUTPUT: RUNS, K.K_ACTIVE_RUN: CLSRUN})
 record("batch", "the batch tab renders without error", not at.exception,
        f"{[e.value for e in at.exception][:1]}")
 record("batch", "a folder picker is offered for batches",
@@ -99,7 +99,7 @@ record("batch", "a folder picker is offered for batches",
 
 # ══ 5 · Results — comparison and files ═════════════════════════════════════
 print("\n5 · Results: compare two runs")
-at = page("pages/5_Results.py", **{K.K_OUTPUT: RUNS})
+at = page("views/5_Results.py", **{K.K_OUTPUT: RUNS})
 record("results", "renders", not at.exception, f"{[e.value for e in at.exception][:1]}")
 # The comparison block only appears once runs are ticked in the table's
 # `select` column. st.data_editor is not exposed by AppTest, so the checkbox
@@ -128,7 +128,7 @@ if run_sel:
 
 # ══ 6 · Training page panels for a finished run ════════════════════════════
 print("\n6 · Training: panels of a finished run")
-at = page("pages/4_Training.py", **{K.K_DATASET: DatasetConfig(
+at = page("views/4_Training.py", **{K.K_DATASET: DatasetConfig(
               root=os.path.join(T,"ts_data","cls_shapes"), task=Task.CLASSIFICATION,
               modality=Modality.RGB, classes=["circle","square","stripe"],
               n_train=210, n_val=60, n_test=30, channels=3),

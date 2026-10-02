@@ -7,6 +7,7 @@ installation warning.
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import platform
 import shutil
@@ -248,13 +249,10 @@ def missing_packages() -> list[str]:
         "cv2": "opencv-python-headless",
         "sklearn": "scikit-learn",
     }
-    missing = []
-    for mod, pip_name in required.items():
-        try:
-            __import__(mod)
-        except Exception:
-            missing.append(pip_name)
-    return missing
+    # find_spec locates a package without importing it: importing all of these
+    # cost the Dashboard several seconds of blank page on a cold start.
+    return [pip_name for mod, pip_name in required.items()
+            if importlib.util.find_spec(mod) is None]
 
 
 if __name__ == "__main__":
