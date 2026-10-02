@@ -287,5 +287,89 @@ at = at.selectbox(key="preset_pick").select(("preset", "t7-recipe")).run()
 at = at.button(key="preset_delete").click().run()
 record("presets", "a preset can be deleted", not os.path.exists(saved), "")
 
+# ══ 7 · Detailed analysis ══════════════════════════════════════════════════
+print("\n7 · The Analysis tab finds what the quick scan cannot")
+import hashlib
+from pathlib import Path
+from harness import dp
+from PIL import Image
+
+DATA = os.path.join(TMP, "data")
+for task in ("cls", "seg"):
+    shutil.copytree(os.path.join(T, "messy", task), os.path.join(DATA, task))
+
+
+def tree_hash(root):
+    h = hashlib.md5()
+    for p in sorted(Path(root).rglob("*")):
+        if p.is_file():
+            h.update(str(p.relative_to(root)).encode())
+            h.update(p.read_bytes())
+    return h.hexdigest()
+
+
+def dataset_page(path):
+    return page("views/1_Dataset.py", **{dp("dataset", "selected"): path})
+
+
+def press(at, label):
+    b = [b for b in at.button if b.label and label in b.label]
+    return b[0].click().run() if b else None
+
+
+expect = {
+    "cls": ["different image sizes", "more than one split", "could not be opened",
+            "more than 8 bits", "alpha channel", "grayscale and colour"],
+    "seg": ["different image sizes", "more than one split", "could not be opened",
+            "differ in size from their image", "nearly uniform", "mixed file formats"],
+}
+for task, wanted in expect.items():
+    src = os.path.join(DATA, task)
+    at = dataset_page(src)
+    record("analysis", f"{task}: the tab offers the analysis", any(
+        b.label and "detailed analysis" in b.label for b in at.button), "")
+    at = press(at, "Run detailed analysis")
+    text = blob(at) if at is not None else ""
+    record("analysis", f"{task}: it runs without an error", at is not None and not at.exception,
+           f"{[e.value for e in at.exception][:1]}" if at is not None else "no button")
+    for w in wanted:
+        record("analysis", f"{task}: finds “{w}”", w in text, "")
+
+# ══ 8 · Standardising ══════════════════════════════════════════════════════
+print("\n8 · Standardise writes a uniform copy and leaves the source alone")
+for task in ("cls", "seg"):
+    src = os.path.join(DATA, task)
+    before = tree_hash(src)
+    at = press(dataset_page(src), "Run detailed analysis")
+    out_box = [t for t in at.text_input if t.key and t.key.startswith("std_out_")]
+    record("standardise", f"{task}: the standardise controls are shown", bool(out_box), "")
+    if not out_box:
+        continue
+    bad = out_box[0].set_value(os.path.join(src, "inside")).run()
+    record("standardise", f"{task}: a target inside the dataset is refused",
+           bad.button(key="std_go").disabled and "inside the dataset" in blob(bad), "")
+    out = os.path.join(TMP, f"{task}_standardised")
+    at = bad.text_input(key=out_box[0].key).set_value(out).run()
+    at = at.button(key="std_go").click().run()
+    record("standardise", f"{task}: the copy is written", os.path.isdir(out) and not at.exception,
+           f"{[e.value for e in at.exception][:1]}")
+    record("standardise", f"{task}: the source is byte-for-byte unchanged", tree_hash(src) == before, "")
+    sizes = set()
+    for p in Path(out).rglob("*"):
+        if p.suffix.lower() in (".png", ".tif") and "masks" not in p.parts:
+            try:
+                sizes.add(Image.open(p).size)
+            except Exception:
+                pass                    # the corrupt fixture file, copied unchanged
+    record("standardise", f"{task}: every image in the copy has one size", len(sizes) == 1, f"{sizes}")
+    record("standardise", f"{task}: the copy is selected", ss_get(at, dp("dataset", "selected")) == out,
+           f"{ss_get(at, dp('dataset', 'selected'))}")
+    at2 = dataset_page(out)
+    record("standardise", f"{task}: the copy scans as valid", "structure is valid" in blob(at2), "")
+    record("standardise", f"{task}: and says what it is a copy of", "standardised copy of" in blob(at2), "")
+    back = press(at2, "Back to the original")
+    record("standardise", f"{task}: one click returns to the original",
+           back is not None and ss_get(back, dp("dataset", "selected")) == src, "")
+
 shutil.rmtree(TMP, ignore_errors=True)
 sys.exit(summary("UI TEST 7 · new features"))

@@ -93,6 +93,8 @@ def main() -> int:
     ap.add_argument("path", help="the dataset root folder")
     ap.add_argument("--task", choices=[t.value for t in Task],
                     help="force the task instead of detecting it")
+    ap.add_argument("--analyze", action="store_true",
+                    help="also read every image header: sizes, modes, duplicates, ...")
     args = ap.parse_args()
 
     root = _describe_path(args.path)
@@ -115,7 +117,12 @@ def main() -> int:
         _line("classes", ", ".join(
             f"{c} ({totals[c]})" if c in totals else c for c in res.classes))
     if res.median_size:
-        _line("median size", f"{res.median_size[0]} × {res.median_size[1]}")
+        _line("median size", f"{res.median_size[1]} × {res.median_size[0]} (W × H)")
+    if res.size_range and res.size_range[0] != res.size_range[1]:
+        (h0, w0), (h1, w1) = res.size_range
+        _line("size range", f"{w0}×{h0} – {w1}×{h1} (W × H, sampled)")
+    if res.task in (Task.CLASSIFICATION, Task.SEGMENTATION):
+        _line("channels", res.channels)
     if res.mask_values:
         _line("mask values", res.mask_values)
     _line("scanned in", f"{res.elapsed * 1000:.0f} ms ({res.sampled} files sampled)")
@@ -128,6 +135,27 @@ def main() -> int:
                 print(f"       {issue.detail}")
             if issue.items:
                 print(f"       {', '.join(issue.items[:8])}")
+
+    if args.analyze and res.task is not None:
+        from data.analysis import analyze_dataset
+
+        a = analyze_dataset(res)
+        print("\nANALYSIS")
+        _line("images", f"{a.analysed:,} of {a.n_files:,} read")
+        _line("distinct sizes", f"{len(a.sizes):,}" + (
+            f" · {', '.join(f'{w}×{h} ({n})' for (w, h), n in a.sizes.most_common(4))}"
+            if a.sizes else ""))
+        if a.aspects:
+            _line("aspect ratio", f"{min(a.aspects):.2f} – {max(a.aspects):.2f} (W / H)")
+        _line("modes", ", ".join(f"{m} ({n})" for m, n in a.modes.most_common()))
+        _line("formats", ", ".join(f"{f} ({n})" for f, n in a.formats.most_common()))
+        _line("analysed in", f"{a.elapsed:.1f} s")
+        for issue in a.findings:
+            print(f"  {issue.icon} {issue.title}")
+            if issue.detail:
+                print(f"       {issue.detail}")
+            if issue.items:
+                print(f"       {', '.join(issue.items[:4])}")
 
     if res.candidates:
         print("\nDATASETS ONE LEVEL DOWN — select one of these instead")
