@@ -33,3 +33,7 @@ docker/runs/
 
 # Local configuration
 .env
+
+# The UI tests' synthetic datasets and training runs — hundreds of megabytes,
+# built by tests/ui/fixtures.py and never needed in the image
+.ui-fixtures/
