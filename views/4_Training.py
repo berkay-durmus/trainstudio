@@ -15,7 +15,15 @@ import streamlit as st
 
 from core import runs
 from core.events import MetricAccumulator, tail_events, tail_log
-from core.launcher import force_kill, request_stop, runner_stdout, stop_requested
+from core.launcher import (
+    cancel_pause,
+    force_kill,
+    pause_requested,
+    request_pause,
+    request_stop,
+    runner_stdout,
+    stop_requested,
+)
 from core.schemas import Layout, RunStatus, metric_mode
 from ui import state
 from ui.charts import curves, sparkline
@@ -27,6 +35,7 @@ from ui.components import (
     fmt_duration,
     fmt_metric,
     page_header,
+    resume_run_control,
     status_pill,
 )
 
@@ -103,25 +112,51 @@ def live_panel() -> None:
     running = fresh.status == RunStatus.RUNNING and runs.process_alive(fresh.pid)
 
     # ── Status strip ─────────────────────────────────────────────────────
-    head, ctrl = st.columns([4, 1.2])
+    can_resume, why_not, next_epoch = runs.resume_info(fresh)
+    head, ctrl = st.columns([3.6, 1.6])
     with head:
-        stopping = stop_requested(run_dir)
-        label = "Stopping…" if (running and stopping) else fresh.status.label
+        stopping, pausing = stop_requested(run_dir), pause_requested(run_dir)
+        label = fresh.status.label
+        if running and stopping:
+            label = "Stopping…"
+        elif running and pausing:
+            label = f"Pausing after epoch {max(fresh.epoch, acc.current_epoch)}…"
         st.markdown(
             status_pill(fresh.status.value, label) +
             f" &nbsp; <span class='ts-mono'>{fresh.run_name}</span>",
             unsafe_allow_html=True)
         dim(f"{fresh.model} · {fresh.dataset} · monitored metric: {monitor}")
     with ctrl:
-        if running:
-            if st.button("⏹ Stop", width="stretch", type="primary"):
-                request_stop(run_dir)
-                st.toast("Stop requested — the model will be saved and the run will close.")
+        if running and not stopping:
+            p, s = st.columns(2)
+            if pausing:
+                if p.button("✕ Cancel pause", width="stretch", key="pause_cancel"):
+                    cancel_pause(run_dir)
+                    st.rerun()
+            elif p.button("⏸ Pause", width="stretch", key="pause",
+                          help="Stop when this epoch ends — nothing is lost, and Resume "
+                               "continues with the next epoch"):
+                request_pause(run_dir)
+                st.toast("The run will pause when this epoch ends.")
                 st.rerun()
-        elif fresh.status == RunStatus.RUNNING:
+            if s.button("⏹ Stop now", width="stretch", type="primary", key="stop",
+                        help="Stop after the current batch — Resume repeats this epoch"):
+                request_stop(run_dir)
+                st.toast("Stop requested — the model will be saved and the run will close; "
+                         "it can be resumed from the last finished epoch.")
+                st.rerun()
+        elif fresh.status == RunStatus.RUNNING and not running:
             if st.button("⚠️ Terminate the process", width="stretch"):
                 force_kill(run_dir)
                 st.rerun()
+        elif resume_run_control(fresh, key=f"train_{run_dir}"):
+            st.rerun()
+        if can_resume:
+            st.caption(f"Continues from epoch {next_epoch} of {fresh.total_epochs}"
+                       if next_epoch <= (fresh.total_epochs or next_epoch)
+                       else "Every epoch is done; resuming writes the results")
+        elif fresh.status in (RunStatus.STOPPED, RunStatus.FAILED):
+            st.caption(why_not)
 
     # ── KPIs ─────────────────────────────────────────────────────────────
     last = acc.epochs[-1] if acc.epochs else {}
