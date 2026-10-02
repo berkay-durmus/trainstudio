@@ -55,7 +55,7 @@ framework re-rendering a page.
 | | |
 |---|---|
 | **69 curated models** | timm, torchvision, segmentation-models-pytorch, HuggingFace transformers, Ultralytics and MONAI — one catalogue, sorted newest first |
-| **Your data stays put** | The dataset is read in place from a path you pick. Nothing is uploaded, copied or moved |
+| **Your data stays put** | The dataset is read in place from a path you pick. Nothing is uploaded, moved or changed — a standardised copy is written only when you ask for one |
 | **Medical imaging first** | DICOM series, NIfTI volumes, HU windowing with presets, modality-aware augmentation |
 | **Hyperparameters with reasons** | Every value is suggested from your dataset statistics and your GPU, and the reason is shown next to the field |
 | **Live training** | Loss curves, per-class metrics, sample previews and the raw process log, updated while the run continues |
@@ -563,6 +563,24 @@ The transposed order used by YOLO exports — `images/train/` and `labels/train/
 If just `train/` exists, the app offers a **stratified automatic split**. No files are
 copied: a `splits.json` is written at the dataset root and training reads from it.
 
+### Images of different sizes?
+
+Training resizes every image to one square input, which stretches any image whose shape
+differs. The **🔬 Analysis** tab on the Dataset page can write a copy in which every image
+has the same size instead — next to the original, which is left exactly as it is:
+
+| Method | What it does |
+|---|---|
+| Letterbox (default) | Scales the long side to the size and pads the short side — proportions are kept |
+| Resize | Stretches to the square, once, instead of on every epoch |
+| Centre crop | Scales the short side to the size and cuts the centre square out |
+
+The copy mirrors the original file for file, so `splits.json` and `dataset.yaml` carry over,
+and it is selected automatically (one click goes back). Images keep their bit depth and
+channels; masks are resized with nearest-neighbour, and letterbox padding in a mask gets the
+ignore index, so the loss does not count it as background — unless 255 is itself a label
+(0/255 masks), in which case it is padded with 0. DICOM and 3D volumes are not rewritten.
+
 ### dataset.yaml (optional)
 
 Makes the class names, modality and windowing permanent. It can be written from the UI in
@@ -587,6 +605,7 @@ python scripts/check_dataset.py /path/to/my_dataset
 It prints how your path was interpreted, whether it is readable, the resolved layout, the
 detected task, split and class counts, and every issue the Dataset page would show. Exit
 status is `0` when the dataset is usable, so it also works as a check in a script.
+`--analyze` adds the detailed analysis described under step 1 below.
 
 ### Synthetic data to try it out
 
@@ -621,6 +640,15 @@ If the structure is not recognised, the page names the missing piece rather than
 "invalid" — and if you picked a folder that *contains* datasets, it offers them as
 one-click buttons.
 
+The **🔬 Analysis** tab goes further than the quick scan: it reads every image header and
+samples pixels to report the size distribution and aspect ratios, how many images are
+smaller than common model inputs, mixed grayscale/colour/alpha images, 16-bit images, mixed
+file formats, unreadable files, byte-identical images — flagged as leakage when one sits in
+two splits — near-uniform images, per-channel mean and standard deviation, and for
+segmentation, masks whose size differs from their image, empty masks and the share of pixels
+per label. Each finding says what to do about it, and mixed sizes can be
+[standardised](#images-of-different-sizes) from there.
+
 ### 2 · Model Selection
 
 ![Model selection](docs/screenshots/04-model-selection.png)
@@ -643,6 +671,19 @@ mixed precision, EMA, gradient accumulation, early stopping and the monitored me
 all here, and the exact `config.json` that will be written can be inspected before you
 start.
 
+**Regularisation & stability** holds dropout, stochastic depth (drop path), the EMA of the
+weights and its decay, gradient clipping and layer-wise learning-rate decay. Each model offers
+only what its library can apply — a ResNet has no dropout setting, Ultralytics keeps its own
+EMA — and starts from that library's own default for the architecture, so leaving a field
+alone trains exactly the model it always did.
+
+**💾 Save preset** stores the current settings under a name; **📂 Load preset** lays a saved
+preset, or any past run's configuration, over another model's settings. The training recipe —
+epochs, optimizer, schedule, loss, regularisation, augmentation — always comes along; the
+values chosen for one architecture (batch size, learning rate, input size, encoder) only when
+you tick the box, and those chosen for one machine (AMP, workers) never. Whatever was left out
+is listed with the reason. Presets live in `~/.trainstudio/presets/` (`TRAINSTUDIO_HOME`).
+
 ### 4 · Training
 
 ![Training](docs/screenshots/06-training.png)
@@ -656,7 +697,10 @@ not affect anything. **Stop** asks the trainer to finish cleanly and save `last.
 ![Results](docs/screenshots/07-results.png)
 
 Every run found in your output folders, filterable by task and status. Tick two or more to
-compare their curves on one axis and download the comparison as CSV. Per-run: the full
+compare their curves on one axis and download the comparison as CSV, or delete every ticked
+run at once. A single run can also be deleted from its row on the Dashboard or from the
+Training page once it has ended; a run that is still training cannot be deleted until it is
+stopped. Per-run: the full
 metric set, per-class tables, plots, and every artifact as a download — including the
 self-contained `report.html`.
 
@@ -803,6 +847,7 @@ real dataset is read. The first run trains those two models, so allow a few minu
 | `t4` | Which libraries each task offers, catalogue filters, the out-of-catalogue picker, per-backend Settings, 3D and Ultralytics paths, `splits.json` |
 | `t5` | Every page inside `st.navigation`, the empty-state guards, one full Dataset → Model → Settings walk-through |
 | `t6` | Real predictions, Grad-CAM, TorchScript export, run comparison, finished-run panels |
+| `t7` | Deleting runs (and refusing a live one), regularisation fields per backend, presets across models and tasks, the detailed analysis and standardising — on copies, with a temporary `TRAINSTUDIO_HOME` |
 
 Two things AppTest cannot reach, checked a level lower instead: `st.data_editor` (the
 run-comparison checkboxes — the comparison functions are called directly) and the
@@ -847,9 +892,12 @@ core/       schemas.py   the pydantic contract for config.json
             paths.py     permission-safe filesystem helpers
             events.py    the append-only event stream
             prefs.py     user preferences
+            capabilities.py  which settings each backend applies, and how
+            presets.py   saved training configurations
 data/       spec.py      the canonical dataset contract and alias matching
             scan.py      validation and statistics
             readers.py   PNG/JPG/TIFF · DICOM · NIfTI
+            analysis.py  the detailed analysis   standardize.py  the uniform-size copy
             datasets_2d.py  datasets_3d.py  splitter.py  convert_yolo.py
 trainers/   base.py      the shared training loop
             cls_timm.py  cls_torchvision.py  seg_smp.py  seg_torchvision.py
@@ -857,7 +905,7 @@ trainers/   base.py      the shared training loop
             torchvision_common.py  losses.py  preview.py
 metrics/    classification.py  segmentation.py  report.py
 export/     inference.py the checkpoint loader, prediction, Grad-CAM and export
-ui/         theme.py  components.py  charts.py  dir_picker.py  state.py
+ui/         theme.py  components.py  charts.py  dir_picker.py  state.py  dataset_tools.py
 views/      0_Dashboard  1_Dataset  2_Model_Selection  3_Settings
             4_Training   5_Results  6_Inference
             (deliberately not pages/ — see the note in app.py)

@@ -11,10 +11,12 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from core.capabilities import spec_knobs
 from core.hardware import DeviceInfo, detect, recommended_workers, usable_vram_gb
 from core.registry import DEFAULT_ENCODER, ModelSpec
 from core.schemas import (
     AUG_PRESETS,
+    DEFAULT_MONITOR,
     AugConfig,
     Backend,
     DatasetConfig,
@@ -260,6 +262,42 @@ def recommend(
             "initialised head cannot damage the backbone."
         )
 
+    # ── Regularisation ───────────────────────────────────────────────────
+    # Start every knob from the library's own default for this architecture, so
+    # an untouched run trains the model it always did; the catalogue's
+    # stochastic-depth presets only ever reached timm, and still do.
+    knobs = spec_knobs(spec)
+    for field in ("drop_rate", "drop_path_rate"):
+        if field not in knobs:
+            setattr(hp, field, 0.0)
+        elif spec.backend != Backend.TIMM or field not in spec.rec:
+            setattr(hp, field, knobs[field].default)
+    small = n < 5_000
+    if "drop_rate" in knobs:
+        why["drop_rate"] = (
+            f"{spec.display_name}'s own default ({knobs['drop_rate'].default:g}). "
+            + ("With few samples, 0.2–0.3 before the classifier is a cheap guard "
+               "against overfitting." if small else
+               "Raise it if the validation loss climbs while the training loss keeps falling.")
+        )
+    if "drop_path_rate" in knobs:
+        why["drop_path_rate"] = (
+            ("The catalogue's value for this family: " if spec.backend == Backend.TIMM
+             and "drop_path_rate" in spec.rec else f"{spec.display_name}'s own default: ")
+            + f"{hp.drop_path_rate:g}. Stochastic depth randomly skips residual blocks; "
+            "deeper and larger models usually take 0.1–0.3."
+        )
+    total_steps = max(1, n // max(1, hp.batch_size)) * epochs
+    hp.ema = False
+    why["ema"] = ("An exponential moving average of the weights is evaluated instead of the "
+                  "raw ones. It usually adds a little accuracy and smooths noisy validation "
+                  "curves, at the cost of a second copy of the model in memory.")
+    why["ema_decay"] = (
+        "How slowly the average follows the weights. Keep 1 / (1 − decay) well below the "
+        f"total number of steps (about {total_steps:,} here): 0.999 for short "
+        "runs, 0.9998–0.9999 for long ones."
+    )
+
     # ── Runtime ──────────────────────────────────────────────────────────
     why["amp"] = (
         "On CUDA, mixed precision halves memory use and speeds training up."
@@ -278,6 +316,17 @@ def recommend(
         f"for {hp.patience} epochs."
     )
     hp.early_stopping = True
+    # Name the metric outright: the Settings page offers concrete metrics only,
+    # and "auto" there fell through to the first in the list — accuracy, even on
+    # an imbalanced dataset, where it is the metric to distrust.
+    hp.monitor_metric = DEFAULT_MONITOR[ds.task]
+    why["monitor_metric"] = (
+        "Balanced accuracy weighs every class equally, so a model cannot score well by "
+        "favouring the largest class; it picks the best checkpoint and drives early stopping."
+        if ds.task == Task.CLASSIFICATION else
+        "Mean Dice over the foreground classes: it tracks overlap with the masks rather than "
+        "pixel accuracy, which an all-background prediction already scores well on."
+    )
 
     # ── Encoder (smp) ────────────────────────────────────────────────────
     if spec.needs_encoder:

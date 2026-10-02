@@ -124,6 +124,58 @@ def derived() -> None:
     (ROOT / "permclass" / "train" / "stripe").chmod(0o000)
     (ROOT / "permroot").chmod(0o000)
 
+    # ── messy copies for the detailed analysis and standardising ────────────
+    for task, src in (("cls", CLS), ("seg", SEG)):
+        dst = ROOT / "messy" / task
+        if not (dst / ".built").is_file():
+            log(f"deriving the messy {task} dataset")
+            _messy(src, dst, task)
+            (dst / ".built").touch()
+
+
+def _messy(src: Path, dst: Path, task: str) -> None:
+    """A copy with every problem the analysis looks for, one or a few of each:
+    mixed sizes and aspect ratios, a grayscale, an RGBA and a 16-bit TIFF image,
+    a uniform image, an image in both train and val, a corrupt file and — for
+    segmentation — a mask whose size differs from its image."""
+    import cv2
+    import numpy as np
+
+    if dst.exists():
+        shutil.rmtree(dst)
+    _copy(src, dst)
+    imgs = sorted(p for p in dst.rglob("*.png") if "masks" not in p.parts)
+
+    def mask_of(p: Path) -> Path:
+        return p.parent.parent / "masks" / p.name
+
+    sizes = [(346, 346), (512, 649), (640, 480), (300, 520), (128, 96)]
+    for i, p in enumerate(imgs):
+        w, h = sizes[i % len(sizes)]
+        im = cv2.imread(str(p), cv2.IMREAD_UNCHANGED)
+        cv2.imwrite(str(p), cv2.resize(im, (w, h), interpolation=cv2.INTER_AREA))
+        if task == "seg":
+            m = cv2.imread(str(mask_of(p)), cv2.IMREAD_UNCHANGED)
+            cv2.imwrite(str(mask_of(p)), cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST))
+    cv2.imwrite(str(imgs[1]), cv2.imread(str(imgs[1]), cv2.IMREAD_GRAYSCALE))
+    cv2.imwrite(str(imgs[2]), cv2.cvtColor(cv2.imread(str(imgs[2])), cv2.COLOR_BGR2BGRA))
+    tif = imgs[3].with_suffix(".tif")
+    cv2.imwrite(str(tif), cv2.imread(str(imgs[3]), cv2.IMREAD_GRAYSCALE).astype(np.uint16) * 257)
+    imgs[3].unlink()
+    if task == "seg":
+        mask_of(imgs[3]).rename(mask_of(tif).with_suffix(".png"))
+    cv2.imwrite(str(imgs[4]), np.full((200, 200, 3), 128, np.uint8))
+    if task == "seg":
+        cv2.imwrite(str(mask_of(imgs[4])), np.zeros((200, 200), np.uint8))
+    train = [p for p in imgs if "train" in p.parts and p.exists()]
+    dup = next(p for p in imgs if "val" in p.parts)
+    shutil.copy(train[5], dup)
+    if task == "seg":
+        shutil.copy(mask_of(train[5]), mask_of(dup))
+    train[6].write_bytes(b"\x89PNG\r\n\x1a\nnot really a png")
+    if task == "seg":
+        cv2.imwrite(str(mask_of(train[7])), np.zeros((50, 60), np.uint8))
+
 
 def training_runs(force: bool) -> None:
     runs = ROOT / "e2e" / "runs"

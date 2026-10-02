@@ -91,6 +91,13 @@ METRIC_HIGHER_IS_BETTER = {
     "map50": True, "map50_95": True,
 }
 
+# The losses offered per task — shared by the Settings page and presets
+LOSS_CHOICES = {
+    Task.CLASSIFICATION: ("ce", "focal", "bce"),
+    Task.SEGMENTATION: ("dice_ce", "dice_focal", "dice", "ce", "tversky", "focal"),
+    Task.SEGMENTATION3D: ("dice_ce", "dice_focal", "dice", "ce", "tversky", "focal"),
+}
+
 DEFAULT_MONITOR = {
     Task.CLASSIFICATION: "balanced_accuracy",
     Task.SEGMENTATION: "dice_macro",
@@ -319,7 +326,9 @@ class ModelSelection(BaseModel):
 # Run configuration — the root object written to disk
 # ─────────────────────────────────────────────────────────────────────────────
 
-CONFIG_VERSION = 1
+# 2: drop_rate / drop_path_rate reach every backend that has them (see
+#    core/capabilities.py). Version-1 files carry values only timm applied.
+CONFIG_VERSION = 2
 
 
 class RunConfig(BaseModel):

@@ -130,6 +130,34 @@ def class_distribution(
     return fig
 
 
+def size_scatter(sizes: Mapping[tuple[int, int], int], height: int = 320) -> go.Figure:
+    """Every distinct image size as a point; its area grows with how many images have it."""
+    fig = _fig("", height, "sizes", xaxis_title="Width (px)", yaxis_title="Height (px)",
+               showlegend=False, hovermode="closest")
+    ws = [w for w, _ in sizes]
+    hs = [h for _, h in sizes]
+    counts = list(sizes.values())
+    peak = max(counts, default=1)
+    fig.add_trace(go.Scatter(
+        x=ws, y=hs, mode="markers",
+        marker=dict(size=[10 + 30 * (c / peak) ** 0.5 for c in counts],
+                    color=PALETTE["accent"], opacity=0.75,
+                    line=dict(width=1, color=PALETTE["bg"])),
+        customdata=counts,
+        hovertemplate="%{x}×%{y}: %{customdata:,} image(s)<extra></extra>",
+    ))
+    return fig
+
+
+def histogram(values: Sequence[float], x_title: str, height: int = 320,
+              bins: int = 30) -> go.Figure:
+    fig = _fig("", height, f"hist_{x_title}", xaxis_title=x_title,
+               yaxis_title="Images", showlegend=False, bargap=0.05)
+    fig.add_trace(go.Histogram(x=list(values), nbinsx=bins, marker_color=PALETTE["accent"],
+                               hovertemplate="%{x}: %{y:,}<extra></extra>"))
+    return fig
+
+
 def horizontal_bars(labels: Sequence[str], values: Sequence[float], title: str = "",
                     x_title: str = "", height: int | None = None,
                     color: str | None = None, x_range: tuple[float, float] | None = None) -> go.Figure:

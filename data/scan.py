@@ -667,10 +667,11 @@ def _sample_image_stats(files: list[Path], res: ScanResult,
         res.size_range = ((min(heights), min(widths)), (max(heights), max(widths)))
         res.channels = int(statistics.mode(chans)) if chans else 3
         if len(set(heights)) > 1 or len(set(widths)) > 1:
+            (h0, w0), (h1, w1) = res.size_range
             res.add("info", "Image sizes vary",
-                    f"They range from {res.size_range[0][0]}×{res.size_range[0][1]} to "
-                    f"{res.size_range[1][0]}×{res.size_range[1][1]}. "
-                    "During training they will all be resized to the input size you choose.")
+                    f"They range from {w0}×{h0} to {w1}×{h1} (W × H). During training they "
+                    "will all be stretched to the input size you choose; the 🔬 Analysis tab "
+                    "can write a copy with one size that keeps their proportions.")
 
     if dicom_seen:
         # For DICOM, the intensity range matters when suggesting a window

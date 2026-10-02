@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import torch.nn as nn
 
+from core.capabilities import log_applied, model_kwargs
 from trainers.cls_timm import TimmClassificationTrainer
 from trainers.torchvision_common import build_classifier
 
@@ -17,12 +18,15 @@ class TorchvisionClassificationTrainer(TimmClassificationTrainer):
 
     def build_model(self) -> nn.Module:
         channels = self.ds.channels if self.ds.channels in (1, 3) else 3
+        reg = model_kwargs(self.cfg)
+        log_applied(self.cfg, self.w, reg)
         model, notes = build_classifier(
             self.cfg.model.arch,
             n_classes=self.n_classes(),
             channels=channels,
             pretrained=self.hp.pretrained,
             weights=self.cfg.model.weights,
+            **reg,
         )
         for note in notes:
             self.w.log(note)

@@ -13,6 +13,7 @@ from core.schemas import Layout, RunStatus, metric_mode
 from ui import state
 from ui.charts import multi_run_curves
 from ui.components import (
+    delete_run_control,
     dim,
     empty_state,
     faint,
@@ -94,7 +95,7 @@ edited = st.data_editor(
     table, width="stretch", hide_index=True, key="runs_table",
     column_config={
         "select": st.column_config.CheckboxColumn("", width="small",
-                                                  help="Tick to include in the comparison"),
+                                                  help="Tick to compare runs, or to delete them"),
         "best": st.column_config.NumberColumn(format="%.4f"),
         "_dir": None,
     },
@@ -102,6 +103,30 @@ edited = st.data_editor(
 )
 
 selected_dirs = edited.loc[edited["select"], "_dir"].tolist()
+
+if selected_dirs:
+    picked_runs = [r for r in filtered if r.run_dir in selected_dirs]
+    busy = [r for r in picked_runs if not runs.is_deletable(r)]
+    with st.popover(f"🗑️ Delete selected ({len(picked_runs)})"):
+        st.markdown("Delete these runs permanently?")
+        for r in picked_runs:
+            note = " — *still running, will be skipped*" if r in busy else ""
+            st.markdown(f"- `{r.run_name}`{note}")
+        st.caption("Every checkpoint, metric and report in their folders is removed. "
+                   "This cannot be undone.")
+        if st.button("Delete permanently", type="primary", key="del_selected",
+                     disabled=len(busy) == len(picked_runs), width="stretch"):
+            deleted, kept = runs.delete_runs(r.run_dir for r in picked_runs)
+            for d in deleted:
+                state.forget_run(d)
+            # The editor remembers ticks by row position: once rows are gone the
+            # ticks would land on other runs, so start the table afresh.
+            st.session_state.pop("runs_table", None)
+            msg = f"Deleted {len(deleted)} run(s)"
+            if kept:
+                msg += f" · {len(kept)} left in place ({', '.join(sorted(set(kept.values())))})"
+            st.toast(msg)
+            st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Comparison
@@ -283,13 +308,4 @@ with d3:
     st.markdown(f"<span class='ts-mono ts-faint'>{run_dir}</span>", unsafe_allow_html=True)
     st.caption(f"Total size: {runs.dir_size_mb(run_dir):.1f} MB")
 
-    with st.expander("🗑️ Delete this run"):
-        st.warning("This cannot be undone — every checkpoint and output will be deleted.")
-        confirm = st.text_input("Type the run name to confirm", key="del_confirm")
-        if st.button("Delete permanently", disabled=confirm != r.run_name):
-            if runs.delete_run(run_dir):
-                # Survives the rerun that removes the run from the list.
-                st.toast("Run deleted.")
-                st.rerun()
-            else:
-                st.error("Could not delete.")
+    delete_run_control(r, key=f"res_{run_dir}", label="🗑️ Delete this run", width="content")

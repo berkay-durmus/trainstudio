@@ -11,7 +11,7 @@ from data import spec as dspec
 from data.readers import CT_WINDOW_PRESETS, read_image, read_mask
 from data.scan import scan_dataset
 from data.splitter import make_splits, split_summary
-from ui import state
+from ui import dataset_tools, state
 from ui.charts import class_distribution
 from ui.components import (
     dim,
@@ -141,6 +141,7 @@ split_note = st.session_state.pop("_split_summary", None)
 if split_note:
     st.success(split_note)
 
+dataset_tools.copy_banner(selected)
 if res.ok:
     st.success(f"The structure is valid — {res.total:,} samples, {len(res.classes)} classes "
                f"(scanned in {res.elapsed * 1000:.0f} ms, {res.sampled} files sampled).")
@@ -153,7 +154,8 @@ issue_list(res.issues)
 # 3 · Details
 # ─────────────────────────────────────────────────────────────────────────────
 
-tab_stats, tab_preview, tab_yaml = st.tabs(["📊 Statistics", "🖼️ Preview", "📝 dataset.yaml"])
+tab_stats, tab_analysis, tab_preview, tab_yaml = st.tabs(
+    ["📊 Statistics", "🔬 Analysis", "🖼️ Preview", "📝 dataset.yaml"])
 
 with tab_stats:
     left, right = st.columns([3, 2], gap="large")
@@ -177,11 +179,12 @@ with tab_stats:
     with right:
         st.markdown("**Image properties**")
         rows = [("Modality", res.modality.label)]
+        # The scan keeps (H, W); shown W × H, like the Analysis tab
         if res.median_size:
-            rows.append(("Median size", f"{res.median_size[0]} × {res.median_size[1]}"))
+            rows.append(("Median size (W × H)", f"{res.median_size[1]} × {res.median_size[0]}"))
         if res.size_range and res.size_range[0] != res.size_range[1]:
             lo, hi = res.size_range
-            rows.append(("Size range", f"{lo[0]}×{lo[1]} – {hi[0]}×{hi[1]}"))
+            rows.append(("Size range (W × H)", f"{lo[1]}×{lo[0]} – {hi[1]}×{hi[0]}"))
         rows.append(("Channels", res.channels))
         if res.volume_shape:
             rows.append(("Volume shape (D×H×W)", "×".join(map(str, res.volume_shape))))
@@ -192,6 +195,9 @@ with tab_stats:
         for k, v in rows:
             st.markdown(f"<div class='ts-kv'><span class='ts-kv-k'>{k}</span>"
                         f"<span class='ts-kv-v'>{v}</span></div>", unsafe_allow_html=True)
+        if res.size_range and res.size_range[0] != res.size_range[1]:
+            dim("Sizes differ: the 🔬 Analysis tab shows how, and can write a copy "
+                "in which they are all the same.")
 
 # ── Modality / windowing ─────────────────────────────────────────────────────
 # A keyed widget keeps its own value across reruns and ignores `index=`/`value=`
@@ -269,6 +275,9 @@ with tab_preview:
                         st.caption(item["label"])
                 except Exception as exc:
                     st.warning(f"The preview failed: {exc}")
+
+with tab_analysis:
+    dataset_tools.render(res, _root_mtime(selected))
 
 with tab_yaml:
     existing = dspec.read_dataset_yaml(res.root)

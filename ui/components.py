@@ -182,3 +182,34 @@ def fmt_metric(v: float | None, digits: int = 4) -> str:
     if abs(v) >= 1000 or (v != 0 and abs(v) < 1e-3):
         return f"{v:.3e}"
     return f"{v:.{digits}f}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Run actions
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def delete_run_control(summary, key: str, label: str = "🗑️", width: str = "stretch") -> None:
+    """A delete button that asks for confirmation in a popover.
+
+    Disabled while the run is still being written to; core.runs.delete_run
+    refuses that case too, so this is a courtesy, not the safeguard.
+    """
+    from core import runs
+    from ui import state
+
+    live = not runs.is_deletable(summary)
+    with st.popover(label, width=width, disabled=live,
+                    help="Stop the run before deleting it" if live else "Delete this run"):
+        st.markdown(f"Delete **{summary.run_name}**?")
+        st.caption("Every checkpoint, metric and report in the run folder is removed. "
+                   "This cannot be undone.")
+        if st.button("Delete permanently", type="primary", key=f"del_{key}", width="stretch"):
+            ok, why = runs.delete_run(summary.run_dir)
+            if ok:
+                state.forget_run(summary.run_dir)
+                # A toast survives the rerun that removes the run from the page
+                st.toast(f"Deleted {summary.run_name}")
+                st.rerun()
+            else:
+                st.error(f"Not deleted: {why}")

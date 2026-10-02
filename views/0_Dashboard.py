@@ -13,6 +13,7 @@ from core.schemas import RunStatus
 from ui import state
 from ui.components import (
     badges,
+    delete_run_control,
     dim,
     empty_state,
     fmt_duration,
@@ -175,6 +176,7 @@ else:
                 if st.button("Open", key=f"open_{r.run_dir}", width="stretch"):
                     state.put(state.K_ACTIVE_RUN, r.run_dir)
                     st.switch_page("views/4_Training.py")
+                delete_run_control(r, key=f"dash_{r.run_dir}")
             if r.total_epochs:
                 st.progress(r.progress)
             if r.error and r.status == RunStatus.FAILED:
