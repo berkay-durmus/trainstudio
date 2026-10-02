@@ -224,7 +224,7 @@ def explain(loaded, image: np.ndarray, method: str, target: int,
     elif method == "lime":
         heat = _lime(m, work, target, BUDGETS[budget][0], seed)
     else:
-        heat = _shap(m, work, target, BUDGETS[budget][1])
+        heat = _shap(m, work, target, BUDGETS[budget][1], seed)
     elapsed = time.time() - t0
 
     # LIME's map is piecewise constant, one value per superpixel; keep it so
@@ -410,15 +410,22 @@ def _lime(m: _Model, work: np.ndarray, target: int, samples: int, seed: int) -> 
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _shap(m: _Model, work: np.ndarray, target: int, max_evals: int) -> np.ndarray:
+def _shap(m: _Model, work: np.ndarray, target: int, max_evals: int, seed: int) -> np.ndarray:
     import shap
 
     score = ScoreFn(m, work, target)
     blur = max(3, m.size // 14) | 1
     masker = shap.maskers.Image(f"blur({blur},{blur})", work.shape)
     explainer = shap.Explainer(score, masker, algorithm="partition")
-    values = explainer(work[None].astype(np.float64), max_evals=max_evals, batch_size=32,
-                       silent=True).values
+    # The Partition explainer breaks ties between regions with np.random; seed it,
+    # without disturbing anyone else's use of the global generator
+    saved = np.random.get_state()
+    np.random.seed(seed)
+    try:
+        values = explainer(work[None].astype(np.float64), max_evals=max_evals, batch_size=32,
+                           silent=True).values
+    finally:
+        np.random.set_state(saved)
     heat = np.asarray(values)[0].reshape(work.shape[0], work.shape[1], -1).sum(-1)
     peak = float(np.abs(heat).max())
     return (heat / peak if peak > 0 else heat).astype(np.float32)
