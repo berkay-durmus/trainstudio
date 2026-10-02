@@ -77,6 +77,12 @@ def derived() -> None:
     flat.mkdir(parents=True, exist_ok=True)
     for img in (CLS / "train").rglob("*.png"):
         shutil.copy2(img, flat / img.name)
+    # ... and the same mistake in every split, as datasets exported flat arrive
+    for split in ("train", "val", "test"):
+        d = ROOT / "flatsplits" / split
+        d.mkdir(parents=True, exist_ok=True)
+        for img in (CLS / split).rglob("*.png"):
+            shutil.copy2(img, d / img.name)
 
     # ── segmentation layouts ────────────────────────────────────────────────
     log("deriving the segmentation layouts")

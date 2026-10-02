@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 
 from core.schemas import Task
+from data import spec as dspec
 from data import standardize as std
 from data.analysis import Analysis, analyze_dataset
 from data.readers import read_image
@@ -44,6 +45,64 @@ def copy_banner(root: str) -> None:
     if Path(info["source"]).is_dir() and c2.button("↩ Back to the original", width="stretch"):
         set_selection("dataset", info["source"])
         st.cache_data.clear()
+        st.rerun()
+
+
+def layout_popup(res: ScanResult, mtime: float) -> None:
+    """Explain a structural mistake in a dialog — once per folder state.
+
+    The issue list states it too, but a dataset in the wrong shape blocks
+    everything after it, and is worth interrupting for.
+    """
+    problem = res.layout_problem
+    if not problem or problem.get("kind") != "flat_splits":
+        return
+    seen = (res.root, mtime)
+    if st.session_state.get("_layout_popup_seen") == seen:
+        return
+    st.session_state["_layout_popup_seen"] = seen
+    _flat_splits_dialog(res)
+
+
+@st.dialog("The dataset is not organised into classes", width="large")
+def _flat_splits_dialog(res: ScanResult) -> None:
+    splits = res.layout_problem["splits"]
+    total = sum(s["files"] for s in splits.values())
+    st.markdown(
+        f"The {total:,} images lie **directly** in the split folders. For classification, "
+        "each image has to sit in a folder named after its class — the folder name is how "
+        "the label is known; file names are not read as labels, so the images have to be "
+        "sorted into those folders first."
+    )
+    found, expected = st.columns(2)
+    with found:
+        st.markdown("**Found**")
+        lines = [f"{Path(res.root).name}/"]
+        for i, (split, s) in enumerate(splits.items()):
+            last = i == len(splits) - 1
+            lines.append(f"{'└──' if last else '├──'} {split}/")
+            pad = "    " if last else "│   "
+            for name in s["examples"][:2]:
+                lines.append(f"{pad}├── {name}")
+            lines.append(f"{pad}└── … {s['files']:,} images, no class folders")
+        st.code("\n".join(lines), language="text")
+    with expected:
+        st.markdown("**Expected**")
+        st.code(f"""{Path(res.root).name}/
+├── train/
+│   ├── <class_a>/   images of class a
+│   └── <class_b>/   images of class b
+├── val/             the same class folders
+└── test/            the same class folders (optional)""", language="text")
+    st.markdown(
+        "**To fix it,** create one folder per class inside `train/`, `val/` and `test/`, and "
+        "move each image into the folder of its class. Then press **🔄 Rescan**."
+    )
+    with st.expander("These are segmentation images?"):
+        st.markdown("Put the images in `images/` and their masks — same file names — in "
+                    "`masks/`, inside each split:")
+        st.code(dspec.LAYOUT_HELP[Task.SEGMENTATION], language="text")
+    if st.button("Got it", type="primary", width="stretch"):
         st.rerun()
 
 

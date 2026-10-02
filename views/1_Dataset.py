@@ -113,6 +113,8 @@ def _root_mtime(root: str) -> float:
 
 res = _scan(selected, force_task, _root_mtime(selected))
 
+dataset_tools.layout_popup(res, _root_mtime(selected))
+
 if res.task is None:
     issue_list(res.issues)
     # Selecting the folder that *contains* the datasets is the usual mis-click;

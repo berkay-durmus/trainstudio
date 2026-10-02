@@ -96,4 +96,32 @@ if split_btn:
     if os.path.isfile(sj):
         os.remove(sj)          # leave the fixture as it was
 
+# ── 5. Images directly in the split folders: one explanation, in a dialog ──
+print("\n5 · Flat splits are explained once, in a dialog")
+from streamlit.testing.v1 import AppTest
+import core.schemas as S
+
+for name, task in (("detected", None), ("forced to classification", S.Task.CLASSIFICATION.label)):
+    def seed(a, task=task):
+        a.session_state[dp("dataset", "selected")] = p("flatsplits")
+        if task:
+            a.session_state["force_task"] = task
+    at = run_page(PAGE, seed)
+    text = blob(at)
+    # A phrase only the dialog uses: the issue list says "lie directly" too
+    DIALOG = "file names are not read as labels"
+    record("flat", f"{name}: the dialog explains it", DIALOG in text, "")
+    record("flat", f"{name}: it shows what was found", "no class folders" in text, "")
+    errs = messages(at, "error")
+    record("flat", f"{name}: one error, not one per symptom",
+           len([e for e in errs if "class" in e.lower() or "recognised" in e.lower()]) == 1
+           and "outside class folders" not in text, f"{errs[:3]}")
+    record("flat", f"{name}: no claim that there is no test set", "there is no test set" not in text, "")
+    again = at.run()
+    record("flat", f"{name}: the dialog does not reappear on the next rerun",
+           DIALOG not in blob(again), "")
+
+at = open_with(p("ts_data", "cls_shapes"))
+record("flat", "a valid dataset opens no dialog", DIALOG not in blob(at), "")
+
 sys.exit(summary("UI TEST 2 · layouts"))
