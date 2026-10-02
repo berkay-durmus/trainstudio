@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+from core.capabilities import log_applied, model_kwargs
 from core.schemas import Layout, Task
 from data.datasets_2d import build_datasets
 from metrics.segmentation import SegmentationMetrics
@@ -36,6 +37,9 @@ class SmpSegmentationTrainer(BaseTrainer):
             in_channels=channels,
             classes=self.n_classes(),
         )
+        reg = model_kwargs(self.cfg)
+        kwargs.update(reg)
+        log_applied(self.cfg, self.w, reg)
         try:
             model = smp.create_model(**kwargs)
         except Exception as exc:

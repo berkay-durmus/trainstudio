@@ -13,6 +13,7 @@ from pathlib import Path
 import streamlit as st
 
 from core import prefs, runs
+from core.capabilities import supports
 from core.hardware import detect
 from core.launcher import LaunchError, start_run
 from core.recommend import recommend
@@ -101,17 +102,24 @@ if touched:
 
 
 def field(name: str, widget, *args, obj=None, why_key: str | None = None, **kwargs):
-    """Draw one hyperparameter field and write any change back to the model."""
+    """Draw one hyperparameter field and write any change back to the model.
+
+    A field this backend cannot apply is shown disabled, with the reason in
+    place of the recommendation's rationale.
+    """
     target = obj if obj is not None else hp
     default = getattr(target, name)
     label = kwargs.pop("label", name)
     if name in touched:
         label = f"{label} ●"
+    ok, why_not = supports(spec, name)
+    if not ok:
+        kwargs["disabled"] = True
     value = widget(label, *args, value=default, key=f"f_{name}", **kwargs)
-    if value != default:
+    if ok and value != default:
         setattr(target, name, value)
         state.mark_touched(name)
-    hint(rec.reason(why_key or name))
+    hint(why_not or rec.reason(why_key or name))
     return value
 
 
@@ -121,13 +129,29 @@ def select_field(name: str, options, *, obj=None, label: str, why_key: str | Non
     default = getattr(target, name)
     idx = list(options).index(default) if default in options else 0
     lbl = f"{label} ●" if name in touched else label
+    ok, why_not = supports(spec, name)
     value = st.selectbox(lbl, options, index=idx, key=f"f_{name}",
-                         format_func=format_func, help=help)
-    if value != default:
+                         format_func=format_func, help=help, disabled=not ok)
+    if ok and value != default:
         setattr(target, name, value)
         state.mark_touched(name)
-    hint(rec.reason(why_key or name))
+    hint(why_not or rec.reason(why_key or name))
     return value
+
+
+def optional_field(name: str, label: str, widget, *, off: float, **kwargs):
+    """A field whose model value is None when switched off; `off` stands for None."""
+    current = getattr(hp, name)
+    if name in touched:
+        label = f"{label} ●"
+    ok, why_not = supports(spec, name)
+    value = widget(label, value=float(off if current is None else current),
+                   key=f"f_{name}", disabled=not ok, **kwargs)
+    new = None if abs(value - off) < 1e-9 else float(value)
+    if ok and new != current:
+        setattr(hp, name, new)
+        state.mark_touched(name)
+    hint(why_not or rec.reason(name))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -201,19 +225,32 @@ with t_optim:
                   format="%.3f", label="Beta 1")
             field("beta2", st.number_input, min_value=0.0, max_value=0.9999, step=0.0001,
                   format="%.4f", label="Beta 2")
-        clip = st.number_input("Gradient clipping (0 = off)",
-                               value=float(hp.grad_clip or 0.0), min_value=0.0, step=0.1)
-        new_clip = clip if clip > 0 else None
-        if new_clip != hp.grad_clip:
-            hp.grad_clip = new_clip
-            state.mark_touched("grad_clip")
-        hint(rec.reason("grad_clip"))
+        if hp.optimizer == "sgd":
+            field("nesterov", st.toggle, label="Nesterov momentum")
+        if hp.scheduler == "step":
+            field("step_size", st.number_input, min_value=1, max_value=1000, step=1,
+                  label="Step every (epochs)")
+            field("step_gamma", st.number_input, min_value=0.01, max_value=1.0, step=0.05,
+                  label="Step factor")
+            hint("The learning rate is multiplied by this factor every step.")
 
-    if hp.layer_decay is not None or "vit" in spec.arch.lower():
-        ld = st.slider("Layer-wise learning rate decay (1.0 = off)",
-                       0.3, 1.0, float(hp.layer_decay or 1.0), 0.05)
-        hp.layer_decay = None if ld >= 0.999 else ld
-        hint(rec.reason("layer_decay"))
+    st.markdown("**🛡️ Regularisation & stability**")
+    r1, r2, r3 = st.columns(3)
+    with r1:
+        field("drop_rate", st.number_input, min_value=0.0, max_value=0.9, step=0.05,
+              format="%.2f", label="Dropout")
+        field("drop_path_rate", st.number_input, min_value=0.0, max_value=0.9, step=0.05,
+              format="%.2f", label="Stochastic depth (drop path)")
+    with r2:
+        field("ema", st.toggle, label="EMA of the weights")
+        if hp.ema:
+            field("ema_decay", st.number_input, min_value=0.9, max_value=0.99999,
+                  step=0.0001, format="%.5f", label="EMA decay")
+    with r3:
+        optional_field("grad_clip", "Gradient clipping (0 = off)", st.number_input,
+                       off=0.0, min_value=0.0, max_value=100.0, step=0.1)
+        optional_field("layer_decay", "Layer-wise learning rate decay (1.0 = off)", st.slider,
+                       off=1.0, min_value=0.3, max_value=1.0, step=0.05)
 
     with st.expander("Early stopping and monitoring"):
         e1, e2, e3 = st.columns(3)
@@ -231,7 +268,7 @@ with t_optim:
         with e3:
             field("val_interval", st.number_input, min_value=1, max_value=50, step=1,
                   label="Validation interval")
-            field("ema", st.toggle, label="EMA (weight averaging)")
+            field("save_last", st.toggle, label="Also keep the last checkpoint")
 
 with t_loss:
     native = spec.backend in (Backend.HF, Backend.ULTRALYTICS)
@@ -272,9 +309,10 @@ with t_loss:
                        " · ".join(f"`{c}` {n:,}" for c, n in counts.items()))
 
 with t_aug:
-    presets = list(AUG_PRESETS) + ["custom"]
-    p_idx = presets.index(aug.preset) if aug.preset in presets else 2
-    preset = st.radio("Preset", presets, index=p_idx, horizontal=True,
+    # Not `presets`: that name is the saved-presets module imported above
+    aug_presets = list(AUG_PRESETS) + ["custom"]
+    p_idx = aug_presets.index(aug.preset) if aug.preset in aug_presets else 2
+    preset = st.radio("Preset", aug_presets, index=p_idx, horizontal=True,
                       format_func=lambda p: {"none": "None", "light": "Light", "medium": "Medium",
                                              "heavy": "Heavy", "custom": "Custom"}[p])
     if preset != aug.preset and preset != "custom":
@@ -290,46 +328,46 @@ with t_aug:
     if rec.reason("aug_elastic"):
         st.caption(f"ℹ️ {rec.reason('aug_elastic')}")
 
+    def prob(name: str, label: str, hi: float = 1.0, step: float = 0.05, **kw):
+        return field(name, st.slider, obj=aug, min_value=0.0, max_value=hi, step=step,
+                     label=label, **kw)
+
     g1, g2, g3 = st.columns(3)
     with g1:
         st.markdown("**Geometric**")
-        aug.hflip = st.slider("Horizontal flip", 0.0, 1.0, aug.hflip, 0.05)
-        aug.vflip = st.slider("Vertical flip", 0.0, 1.0, aug.vflip, 0.05)
-        aug.rot90 = st.slider("90° rotation", 0.0, 1.0, aug.rot90, 0.05)
-        aug.affine_p = st.slider("Affine transform probability", 0.0, 1.0, aug.affine_p, 0.05)
-        aug.rotate_limit = st.slider("Rotation limit (°)", 0, 180, aug.rotate_limit, 5)
-        aug.scale_limit = st.slider("Scale limit", 0.0, 0.5, aug.scale_limit, 0.01)
-        aug.shift_limit = st.slider("Shift limit", 0.0, 0.5, aug.shift_limit, 0.01)
+        prob("hflip", "Horizontal flip")
+        prob("vflip", "Vertical flip")
+        prob("rot90", "90° rotation")
+        prob("affine_p", "Affine transform probability")
+        field("rotate_limit", st.slider, obj=aug, min_value=0, max_value=180, step=5,
+              label="Rotation limit (°)")
+        prob("scale_limit", "Scale limit", hi=0.5, step=0.01)
+        prob("shift_limit", "Shift limit", hi=0.5, step=0.01)
     with g2:
         st.markdown("**Intensity**")
-        aug.brightness_p = st.slider("Brightness/contrast probability", 0.0, 1.0,
-                                     aug.brightness_p, 0.05)
-        aug.brightness_contrast = st.slider("Brightness/contrast magnitude", 0.0, 0.6,
-                                            aug.brightness_contrast, 0.05)
-        aug.gamma_p = st.slider("Gamma", 0.0, 1.0, aug.gamma_p, 0.05)
-        aug.blur_p = st.slider("Blur", 0.0, 1.0, aug.blur_p, 0.05)
-        aug.noise_p = st.slider("Noise", 0.0, 1.0, aug.noise_p, 0.05)
+        prob("brightness_p", "Brightness/contrast probability")
+        prob("brightness_contrast", "Brightness/contrast magnitude", hi=0.6)
+        prob("gamma_p", "Gamma")
+        prob("blur_p", "Blur")
+        prob("noise_p", "Noise")
+        prob("sharpen_p", "Sharpen")
         if ds.modality.is_medical:
-            aug.hu_shift = st.slider("Intensity shift (HU)", 0.0, 100.0, aug.hu_shift, 5.0)
-            aug.hu_scale = st.slider("Intensity scaling", 0.0, 0.3, aug.hu_scale, 0.01)
+            field("hu_shift", st.slider, obj=aug, min_value=0.0, max_value=100.0, step=5.0,
+                  label="Intensity shift (HU)")
+            prob("hu_scale", "Intensity scaling", hi=0.3, step=0.01)
     with g3:
         st.markdown("**Deformation and mixing**")
-        aug.elastic_p = st.slider("Elastic deformation", 0.0, 1.0, aug.elastic_p, 0.05)
-        aug.grid_distortion_p = st.slider("Grid distortion", 0.0, 1.0,
-                                          aug.grid_distortion_p, 0.05)
+        prob("elastic_p", "Elastic deformation")
+        prob("grid_distortion_p", "Grid distortion")
         if ds.task == Task.CLASSIFICATION:
-            aug.coarse_dropout_p = st.slider("Region erasing (cutout)", 0.0, 1.0,
-                                             aug.coarse_dropout_p, 0.05)
-            aug.mixup = st.slider("MixUp α", 0.0, 1.0, aug.mixup, 0.05)
-            aug.cutmix = st.slider("CutMix α", 0.0, 1.0, aug.cutmix, 0.05)
-            hint(rec.reason("mixup"))
-        norm_opts = ["imagenet", "dataset", "minmax", "none"]
-        aug.normalize = st.selectbox(
-            "Normalisation", norm_opts, index=norm_opts.index(aug.normalize),
-            format_func=lambda v: {"imagenet": "ImageNet statistics",
-                                   "dataset": "Compute from the dataset",
-                                   "minmax": "Min–max [0,1]", "none": "None"}[v],
-        )
+            prob("coarse_dropout_p", "Region erasing (cutout)")
+            prob("mixup", "MixUp α")
+            prob("cutmix", "CutMix α")
+        select_field("normalize", ["imagenet", "dataset", "minmax", "none"], obj=aug,
+                     label="Normalisation",
+                     format_func=lambda v: {"imagenet": "ImageNet statistics",
+                                            "dataset": "Compute from the dataset",
+                                            "minmax": "Min–max [0,1]", "none": "None"}[v])
     state.put(state.K_AUG, aug)
 
 with t_runtime:
@@ -356,6 +394,11 @@ with t_runtime:
               disabled=not dev.supports_channels_last)
         field("preview_every_n_epochs", st.number_input, min_value=0, max_value=100, step=1,
               label="Preview frequency (0 = off)")
+        field("compile_model", st.toggle, label="torch.compile",
+              disabled=dev.kind != "cuda")
+        hint("Compiles the model before training: faster steps after a slow first epoch. "
+             "CUDA only." if dev.kind != "cuda" else
+             "Faster steps after a slow first epoch; worth it for long runs.")
 
 state.put(state.K_HP, hp)
 

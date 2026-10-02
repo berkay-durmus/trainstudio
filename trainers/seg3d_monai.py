@@ -13,6 +13,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from core.capabilities import log_applied, model_kwargs
 from core.schemas import Layout, Task
 from data.datasets_3d import build_datasets_3d, median_spacing
 from metrics.segmentation import SegmentationMetrics
@@ -40,21 +41,21 @@ class MonaiSegmentation3DTrainer(BaseTrainer):
         common = dict(spatial_dims=3, in_channels=1, out_channels=n)
 
         builders = {
-            "SwinUNETR": lambda: nets.SwinUNETR(in_channels=1, out_channels=n,
+            "SwinUNETR": lambda **kw: nets.SwinUNETR(**kw, in_channels=1, out_channels=n,
                                                 feature_size=48, spatial_dims=3),
-            "UNETR": lambda: nets.UNETR(in_channels=1, out_channels=n, img_size=size,
+            "UNETR": lambda **kw: nets.UNETR(**kw, in_channels=1, out_channels=n, img_size=size,
                                         feature_size=16, hidden_size=768,
                                         mlp_dim=3072, num_heads=12),
-            "SegResNet": lambda: nets.SegResNet(spatial_dims=3, in_channels=1,
+            "SegResNet": lambda **kw: nets.SegResNet(**kw, spatial_dims=3, in_channels=1,
                                                 out_channels=n, init_filters=16,
                                                 blocks_down=(1, 2, 2, 4),
                                                 blocks_up=(1, 1, 1)),
-            "UNet": lambda: nets.UNet(**common, channels=(16, 32, 64, 128, 256),
+            "UNet": lambda **kw: nets.UNet(**kw, **common, channels=(16, 32, 64, 128, 256),
                                       strides=(2, 2, 2, 2), num_res_units=2),
-            "AttentionUnet": lambda: nets.AttentionUnet(
+            "AttentionUnet": lambda **kw: nets.AttentionUnet(**kw,
                 **common, channels=(16, 32, 64, 128, 256), strides=(2, 2, 2, 2)),
-            "VNet": lambda: nets.VNet(spatial_dims=3, in_channels=1, out_channels=n),
-            "DynUNet": lambda: nets.DynUNet(
+            "VNet": lambda **kw: nets.VNet(**kw, spatial_dims=3, in_channels=1, out_channels=n),
+            "DynUNet": lambda **kw: nets.DynUNet(**kw,
                 **common,
                 kernel_size=[3, 3, 3, 3, 3], strides=[1, 2, 2, 2, 2],
                 upsample_kernel_size=[2, 2, 2, 2],
@@ -64,7 +65,9 @@ class MonaiSegmentation3DTrainer(BaseTrainer):
         if arch not in builders:
             raise ValueError(f"Unsupported MONAI architecture: {arch}")
 
-        model = builders[arch]()
+        reg = model_kwargs(self.cfg)
+        log_applied(self.cfg, self.w, reg)
+        model = builders[arch](**reg)
         if self.hp.pretrained and arch in ("SwinUNETR", "UNETR"):
             self.w.log(f"No off-the-shelf 3D weights are used for {arch}; "
                        "training from scratch is the norm in 3D segmentation.")

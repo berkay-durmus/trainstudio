@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+from core.capabilities import log_applied, model_kwargs
 from core.schemas import Layout, Task
 from data.datasets_2d import build_datasets
 from metrics.classification import ClassificationMetrics
@@ -31,10 +32,9 @@ class TimmClassificationTrainer(BaseTrainer):
             num_classes=self.n_classes(),
             in_chans=self.ds.channels if self.ds.channels in (1, 3) else 3,
         )
-        if self.hp.drop_rate:
-            kwargs["drop_rate"] = self.hp.drop_rate
-        if self.hp.drop_path_rate:
-            kwargs["drop_path_rate"] = self.hp.drop_path_rate
+        reg = model_kwargs(self.cfg)
+        kwargs.update(reg)
+        log_applied(self.cfg, self.w, reg)
 
         try:
             model = timm.create_model(self.cfg.model.arch, **kwargs)

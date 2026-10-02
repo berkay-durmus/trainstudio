@@ -319,7 +319,9 @@ class ModelSelection(BaseModel):
 # Run configuration — the root object written to disk
 # ─────────────────────────────────────────────────────────────────────────────
 
-CONFIG_VERSION = 1
+# 2: drop_rate / drop_path_rate reach every backend that has them (see
+#    core/capabilities.py). Version-1 files carry values only timm applied.
+CONFIG_VERSION = 2
 
 
 class RunConfig(BaseModel):

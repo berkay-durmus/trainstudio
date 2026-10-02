@@ -19,6 +19,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
+from core.capabilities import log_applied, model_kwargs
 from core.schemas import Layout, Task
 from data.datasets_2d import build_datasets
 from metrics.segmentation import SegmentationMetrics
@@ -49,6 +50,10 @@ class HfSegmentationTrainer(BaseTrainer):
             # The pretrained head has a different number of classes; it must be rebuilt
             ignore_mismatched_sizes=True,
         )
+        # Dropout settings are config attributes: from_pretrained overrides them
+        reg = model_kwargs(self.cfg)
+        common.update(reg)
+        log_applied(self.cfg, self.w, reg)
 
         if self.is_mask_classification:
             from transformers import Mask2FormerForUniversalSegmentation

@@ -133,5 +133,92 @@ record("results", "bulk delete removes the finished runs",
 record("results", "and leaves the live one, saying why",
        live in kept and os.path.isdir(live), f"{kept}")
 
+# ══ 5 · Settings: regularisation and the fields that were hidden ═══════════
+print("\n5 · Settings: dropout, stochastic depth, EMA and per-backend support")
+from core.registry import get
+from core.schemas import AUG_PRESETS, DatasetConfig, Modality, Task
+
+CLS_DS = DatasetConfig(root=os.path.join(T, "ts_data", "cls_shapes"), task=Task.CLASSIFICATION,
+                       modality=Modality.RGB, classes=["circle", "square", "stripe"],
+                       n_train=210, n_val=60, n_test=30,
+                       class_counts={"circle": 140, "square": 120, "stripe": 40},
+                       median_image_size=(128, 128), channels=3)
+SEG_DS = DatasetConfig(root=os.path.join(T, "ts_data", "seg_shapes"), task=Task.SEGMENTATION,
+                       modality=Modality.RGB, classes=["background", "lesion"],
+                       n_train=140, n_val=40, n_test=20, median_image_size=(128, 128),
+                       channels=3, mask_foreground_ratio=0.08)
+
+
+def settings(spec_id, ds=CLS_DS):
+    return page("views/3_Settings.py", **{K.K_DATASET: ds, K.K_SPEC: get(spec_id)})
+
+
+def widget(at, kind, key):
+    try:
+        return getattr(at, kind)(key=key)
+    except KeyError:
+        return None
+
+
+at = settings("efficientnet_b0")
+record("settings", "the page renders", not at.exception, f"{[e.value for e in at.exception][:1]}")
+hp = ss_get(at, K.K_HP)
+record("settings", "the monitored metric defaults to balanced accuracy",
+       hp.monitor_metric == "balanced_accuracy", hp.monitor_metric)
+record("settings", "a fresh page marks no field as changed",
+       not ss_get(at, K.K_TOUCHED), f"{ss_get(at, K.K_TOUCHED)}")
+for key in ("f_drop_rate", "f_drop_path_rate"):
+    w = widget(at, "number_input", key)
+    record("settings", f"{key} is offered and enabled for timm", w is not None and not w.disabled, "")
+at = at.number_input(key="f_drop_rate").set_value(0.3).run()
+record("settings", "a dropout value reaches the hyperparameters",
+       abs(ss_get(at, K.K_HP).drop_rate - 0.3) < 1e-9, f"{ss_get(at, K.K_HP).drop_rate}")
+record("settings", "and the config.json preview", '"drop_rate": 0.3' in str(at.json[0].value), "")
+at = at.toggle(key="f_ema").set_value(True).run()
+w = widget(at, "number_input", "f_ema_decay")
+record("settings", "turning EMA on reveals its decay", w is not None, "")
+if w is not None:
+    at = w.set_value(0.999).run()
+    record("settings", "the decay reaches the hyperparameters",
+           abs(ss_get(at, K.K_HP).ema_decay - 0.999) < 1e-9, f"{ss_get(at, K.K_HP).ema_decay}")
+
+at = settings("yolo26n_cls")
+w = widget(at, "toggle", "f_ema")
+record("settings", "Ultralytics: EMA is disabled (it keeps its own)", w is not None and w.disabled, "")
+w = widget(at, "number_input", "f_drop_path_rate")
+record("settings", "Ultralytics: no stochastic depth", w is not None and w.disabled, "")
+w = widget(at, "number_input", "f_drop_rate")
+record("settings", "Ultralytics classification: dropout is available", w is not None and not w.disabled, "")
+w = widget(settings("tv_resnet50"), "number_input", "f_drop_rate")
+record("settings", "torchvision ResNet: dropout is disabled (it has none)",
+       w is not None and w.disabled, "")
+at = settings("smp_fpn", SEG_DS)
+hp = ss_get(at, K.K_HP)
+record("settings", "smp FPN: dropout starts from the library's own 0.2",
+       abs(hp.drop_rate - 0.2) < 1e-9, f"{hp.drop_rate}")
+record("settings", "segmentation monitors mean Dice", hp.monitor_metric == "dice_macro", hp.monitor_metric)
+
+at = settings("efficientnet_b0")
+cur = ss_get(at, K.K_AUG)
+target = next(p for p in ("light", "heavy") if p != cur.preset)
+# A field whose value the two presets disagree on, so the check can fail
+probe = next(f for f in ("rotate_limit", "affine_p", "brightness_p", "blur_p")
+             if AUG_PRESETS[target].get(f, 0) != getattr(cur, f))
+at = at.radio[0].set_value(target).run()
+w = widget(at, "slider", f"f_{probe}")
+want = AUG_PRESETS[target].get(probe, 0)
+record("settings", f"switching the augmentation preset to {target} moves its sliders",
+       w is not None and abs(w.value - want) < 1e-9 and abs(getattr(ss_get(at, K.K_AUG), probe) - want) < 1e-9,
+       f"{probe}: slider={getattr(w, 'value', None)} aug={getattr(ss_get(at, K.K_AUG), probe)} want={want}")
+at = at.slider(key="f_vflip").set_value(0.35).run()
+record("settings", "an augmentation slider is tracked as a change",
+       "vflip" in (ss_get(at, K.K_TOUCHED) or set()) and abs(ss_get(at, K.K_AUG).vflip - 0.35) < 1e-9, "")
+
+# One model per backend: the page must render with the new fields everywhere
+for spec_id, ds in [("tv_convnext_base", CLS_DS), ("smp_unet", SEG_DS), ("hf_segformer_b0", SEG_DS),
+                    ("tv_lraspp_mobilenet_v3_large", SEG_DS), ("yolo26n_seg", SEG_DS)]:
+    at = settings(spec_id, ds)
+    record("settings", f"{spec_id}: renders", not at.exception, f"{[e.value for e in at.exception][:1]}")
+
 shutil.rmtree(TMP, ignore_errors=True)
 sys.exit(summary("UI TEST 7 · new features"))

@@ -122,9 +122,12 @@ def adapt_in_channels(model: nn.Module, channels: int) -> bool:
 
 
 def build_classifier(arch: str, n_classes: int, channels: int = 3,
-                     pretrained: bool = True, weights: str | None = None):
+                     pretrained: bool = True, weights: str | None = None,
+                     **model_kwargs):
     """A torchvision classification model with a head sized for this dataset.
 
+    `model_kwargs` reach the architecture's constructor (dropout, stochastic
+    depth — see core/capabilities.py for which architectures honour which).
     Returns `(model, notes)`; `notes` are lines worth showing in the run log.
     """
     from torchvision.models import get_model
@@ -134,12 +137,12 @@ def build_classifier(arch: str, n_classes: int, channels: int = 3,
     model = None
     if pretrained:
         try:
-            model = get_model(arch, weights=tag)
+            model = get_model(arch, weights=tag, **model_kwargs)
         except Exception as exc:                     # offline, or an unknown tag
             notes.append(f"Could not load the pretrained weights ({exc}); "
                          "starting from scratch.")
     if model is None:
-        model = get_model(arch, weights=None)
+        model = get_model(arch, weights=None, **model_kwargs)
 
     head = replace_head(model, n_classes)
     notes.append(f"{arch} · head `{head}` rebuilt for {n_classes} classes")

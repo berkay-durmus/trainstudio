@@ -16,6 +16,7 @@ import shutil
 import time
 from pathlib import Path
 
+from core.capabilities import log_applied, model_kwargs
 from core.events import E, EventWriter
 from core.hardware import detect, telemetry
 from core.schemas import Layout, RunConfig, RunStatus, Task, metric_mode
@@ -361,6 +362,9 @@ class UltralyticsTrainer:
                 hsv_s=0.0 if self.ds.modality.is_medical else 0.7,
                 hsv_v=0.0 if self.ds.modality.is_medical else 0.4,
             )
+            reg = model_kwargs(self.cfg)            # dropout, classification only
+            args.update(reg)
+            log_applied(self.cfg, self.w, reg)
             self.w.log(f"Ultralytics settings: epochs={args['epochs']} imgsz={args['imgsz']} "
                        f"batch={args['batch']} device={args['device']}")
             self.model.train(**args)
