@@ -185,10 +185,11 @@ print("\n7 · Training page")
 at = seeded("views/4_Training.py", **{st_keys.K_DATASET: ds(Task.CLASSIFICATION),
                                       st_keys.K_SPEC: get("tv_resnet18")})
 # With no run to watch the page sends the user back to Settings; st.switch_page
-# cannot resolve a target when a page is run outside st.navigation.
+# cannot resolve a target when a page is run outside st.navigation. Before
+# Streamlit 1.63 the same case surfaces as a KeyError on 'url_pathname'.
 _excs = [e.value for e in at.exception]
 record("training", "renders with no active run (or redirects to Settings)",
-       not _excs or all("Could not find page" in e for e in _excs), f"{_excs[:1]}")
+       all("Could not find page" in e or "url_pathname" in e for e in _excs), f"{_excs[:1]}")
 at = seeded("views/4_Training.py",
             **{st_keys.K_DATASET: ds(Task.CLASSIFICATION), st_keys.K_SPEC: get("tv_resnet18"),
                st_keys.K_ACTIVE_RUN: os.path.join(RUNS, "tv-cls")})
