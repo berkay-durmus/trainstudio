@@ -30,6 +30,9 @@ def color_for(i: int) -> str:
     return SERIES_COLORS[i % len(SERIES_COLORS)]
 
 
+ROLE_COLORS = {"Training": SERIES_COLORS[0], "Validation": SERIES_COLORS[1]}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Curves
 # ─────────────────────────────────────────────────────────────────────────────
@@ -54,7 +57,9 @@ def curves(
         fig.add_trace(go.Scatter(
             x=list(xs), y=list(ys), name=name,
             mode="lines+markers" if markers and len(xs) < 120 else "lines",
-            line=dict(color=color_for(i), width=2.2),
+            # Training/Validation keep their colour whatever order (or subset)
+            # a chart passes them in, so charts side by side agree
+            line=dict(color=ROLE_COLORS.get(name, color_for(i)), width=2.2),
             marker=dict(size=5),
             hovertemplate=f"<b>{name}</b>: %{{y:.5f}}<extra></extra>",
         ))
@@ -67,6 +72,10 @@ def curves(
         ))
     if log_y:
         fig.update_yaxes(type="log")
+    # Epochs are whole numbers; on a short run plotly would tick 1.2, 1.4, …
+    longest = max((len(xs) for xs, _ in series.values()), default=0)
+    if x_title == "Epoch" and longest <= 12:
+        fig.update_xaxes(dtick=1)
     return fig
 
 
