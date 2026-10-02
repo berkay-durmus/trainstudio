@@ -8,9 +8,9 @@ import numpy as np
 import streamlit as st
 
 from core import prefs, runs
-from core.schemas import Backend, Layout, Task
+from core.schemas import Layout, Task
 from data.readers import is_readable_image, list_files
-from ui import state
+from ui import explain_panel, state
 from ui.charts import horizontal_bars
 from ui.components import dim, empty_state, faint, fmt_metric, page_header
 from ui.dir_picker import directory_picker
@@ -73,7 +73,7 @@ if loaded.task == Task.SEGMENTATION3D:
 
 
 def run_and_show(image: np.ndarray, key: str) -> None:
-    from export.inference import gradcam, predict
+    from export.inference import predict
 
     with st.spinner("Predicting…"):
         pred = predict(loaded, image)
@@ -103,16 +103,7 @@ def run_and_show(image: np.ndarray, key: str) -> None:
                             unsafe_allow_html=True)
         faint(f"Inference time: {pred.inference_ms:.0f} ms")
 
-    if pred.task == Task.CLASSIFICATION and loaded.backend in (
-            Backend.TIMM, Backend.TORCHVISION):
-        if st.toggle("🔥 Grad-CAM — where is the model looking?", key=f"cam_{key}"):
-            cam = gradcam(loaded, image,
-                          int(pred.probs.argmax()) if pred.probs is not None else None)
-            if cam is None:
-                st.caption("Grad-CAM could not be produced for this architecture "
-                           "(`pip install grad-cam` may be required).")
-            else:
-                st.image(cam, caption="Grad-CAM heatmap", width="stretch")
+    explain_panel.render(loaded, image, pred, run_dir, which, key)
 
 
 with tab_single:

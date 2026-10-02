@@ -1,4 +1,4 @@
-"""UI test 6 — the actions inside pages: predict, Grad-CAM, export, compare, logs."""
+"""UI test 6 — the actions inside pages: predict, explanations, export, compare, logs."""
 import os, sys, glob
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from harness import T, PROJ, record, run_page, blob, messages, summary
@@ -11,6 +11,9 @@ import ui.state as K
 RUNS   = os.path.join(T, "e2e", "runs")
 CLSRUN = os.path.join(RUNS, "tv-cls")
 SEGRUN = os.path.join(RUNS, "tv-seg")
+
+def captions(at):
+    return [c for im in at.image for c in im.captions]
 
 def page(p, **kw):
     def seed(a):
@@ -39,18 +42,23 @@ if radios:
                f"errors={messages(at3,'error')[:1]}")
         record("infer", "the predicted class is one of the dataset's",
                any(c in txt for c in ("circle", "square", "stripe")), "")
-        # Grad-CAM must be offered for a torchvision classifier
-        cams = [t for t in at3.toggle if "Grad-CAM" in (t.label or "")]
-        record("infer", "Grad-CAM is offered for torchvision", bool(cams),
+        # The explanation panel: Grad-CAM, LIME and SHAP; Grad-CAM runs at once
+        toggles = [t for t in at3.toggle if "Explain this prediction" in (t.label or "")]
+        record("infer", "explanations are offered", bool(toggles),
                f"toggles={[t.label for t in at3.toggle]}")
-        if cams:
-            at4 = cams[0].set_value(True).run()
-            gone_wrong = [e.value for e in at4.exception]
-            record("infer", "toggling Grad-CAM does not error", not gone_wrong,
-                   f"{gone_wrong[:1]}")
-            record("infer", "Grad-CAM either renders or says why",
-                   len(at4.image) > 0 or "grad-cam could not" in blob(at4).lower(),
-                   f"images={len(at4.image)}")
+        record("infer", "and cost nothing until asked for",
+               not any("grad-cam ·" in c.lower() for c in captions(at3)))
+        at3 = toggles[0].set_value(True).run() if toggles else at3
+        methods = [r for r in at3.radio if (r.label or "") == "Method"]
+        record("infer", "Grad-CAM, LIME and SHAP are offered for torchvision",
+               bool(methods) and list(methods[0].options) == ["Grad-CAM", "LIME", "SHAP"],
+               f"radios={[r.label for r in at3.radio]}")
+        gone_wrong = [e.value for e in at3.exception]
+        record("infer", "the explanation panel does not error", not gone_wrong,
+               f"{gone_wrong[:1]}")
+        record("infer", "Grad-CAM renders without being asked twice",
+               any("grad-cam ·" in c.lower() for c in captions(at3)),
+               f"captions={captions(at3)}")
 
 # ══ 2 · Inference — segmentation prediction ════════════════════════════════
 print("\n2 · Inference: segmentation")
@@ -67,8 +75,8 @@ if radios:
                f"errors={messages(at3,'error')[:1]}")
         record("infer", "an overlay image is shown", len(at3.image) > 0,
                f"images={len(at3.image)}")
-        record("infer", "Grad-CAM is not offered for segmentation",
-               not [t for t in at3.toggle if "Grad-CAM" in (t.label or "")], "")
+        record("infer", "segmentation predictions can be explained too",
+               any("Explain this prediction" in (t.label or "") for t in at3.toggle), "")
     else:
         record("infer", "segmentation samples are offered", False, "none")
 
