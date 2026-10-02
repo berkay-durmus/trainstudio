@@ -13,11 +13,16 @@ behaviour.
   the Dashboard, from the end of its last finished epoch, with results identical to an
   uninterrupted run. Every epoch writes `checkpoints/resume.pt`; `runner.py --resume`
   continues from it.
+- Explanations on the Inference page: Grad-CAM, LIME and SHAP for any class, side by side
+  if wanted, for classification and 2D segmentation — ViT, Swin and Ultralytics classifiers
+  included. Needs the new `lime` and `shap` requirements.
 
 ### Fixed
 - `seed` now reaches the augmentation: albumentations and MONAI transforms drew from
   generators seeded by the OS, so two runs with the same seed differed, and every
   DataLoader worker repeated the same augmentation sequence.
+- Mask2Former checkpoints could not be loaded on the Inference page, and Grad-CAM picked a
+  wrong layer on plain ViTs and torchvision's Swin.
 
 ## [0.1.0] — 2026-10-02
 

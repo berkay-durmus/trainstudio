@@ -63,7 +63,7 @@ framework re-rendering a page.
 | **Hyperparameters with reasons** | Every value is suggested from your dataset statistics and your GPU, and the reason is shown next to the field |
 | **Live training** | Loss curves, per-class metrics, sample previews and the raw process log, updated while the run continues |
 | **Reports you can hand over** | A single self-contained `report.html`, plus CSV/XLSX metrics, confusion matrices, ROC/PR curves |
-| **Inference and export** | Single-image and batch prediction, Grad-CAM, ONNX and TorchScript export |
+| **Inference and export** | Single-image and batch prediction, explanations with Grad-CAM, LIME and SHAP, ONNX and TorchScript export |
 | **Runs anywhere** | One NVIDIA GPU, Apple Silicon (MPS) or plain CPU — detected automatically |
 
 ---
@@ -724,10 +724,24 @@ class covers:
 
 ![Inference, segmentation](docs/screenshots/08-inference.png)
 
-Classification shows the class probabilities, and **Grad-CAM** answers where the model was
-actually looking:
+Classification shows the class probabilities. **🔍 Explain this prediction** answers why,
+for any class you pick — for classification and 2D segmentation alike:
 
 ![Inference, classification with Grad-CAM](docs/screenshots/09-inference-gradcam.png)
+
+| Method | What it shows | Cost |
+|---|---|---|
+| **Grad-CAM** | Where the last feature map responds to the class, weighted by the gradient of its score | One pass; instant |
+| **LIME** | Which superpixels raise (green) or lower (red) the class score, from a linear model fitted to copies with regions switched off | 300–2,000 model evaluations |
+| **SHAP** | How much each region adds to (red) or takes from (blue) the class score, by blurring regions in a hierarchy (Partition explainer) | 300–3,000 model evaluations |
+
+**Compare all** puts the three side by side. LIME and SHAP run on a button that says, measured
+on your machine, roughly how long they will take; **Effort** trades time for steadier maps.
+For segmentation the explained score is the class's mean probability over the region predicted
+for it. Every model in the catalogue is covered — ViT, EVA, DINOv3 and Swin included, whose
+tokens Grad-CAM folds back into a grid — and Ultralytics classifiers; Ultralytics segmentation
+is not, since it predicts instances rather than a score per pixel. LIME and SHAP need
+`pip install lime shap` (in `requirements.txt`; rebuild the Docker image after upgrading).
 
 Export to ONNX or TorchScript in one click.
 
@@ -863,9 +877,10 @@ real dataset is read. The first run trains those two models, so allow a few minu
 | `t3` | Modality detection, CT window presets and manual override, per-dataset class-name editor, `dataset.yaml` round-trip, Continue, Rescan |
 | `t4` | Which libraries each task offers, catalogue filters, the out-of-catalogue picker, per-backend Settings, 3D and Ultralytics paths, `splits.json` |
 | `t5` | Every page inside `st.navigation`, the empty-state guards, one full Dataset → Model → Settings walk-through |
-| `t6` | Real predictions, Grad-CAM, TorchScript export, run comparison, finished-run panels |
+| `t6` | Real predictions, the explanation panel, TorchScript export, run comparison, finished-run panels |
 | `t7` | Deleting runs (and refusing a live one), regularisation fields per backend, presets across models and tasks, the detailed analysis and standardising — on copies, with a temporary `TRAINSTUDIO_HOME` |
 | `t8` | Pause, Stop now and a killed process, each resumed — the result identical to an uninterrupted run, each epoch once, paused time not counted; what is refused; the Training page and Dashboard controls — real CPU training runs |
+| `t9` | Grad-CAM, LIME and SHAP on real classification, segmentation and YOLO runs; a deletion test (blurring a method's top fifth lowers the prediction far more than a random fifth); Grad-CAM's layer on ViT, Swin and CNNs; a missing library; the Inference panel |
 
 Two things AppTest cannot reach, checked a level lower instead: `st.data_editor` (the
 run-comparison checkboxes — the comparison functions are called directly) and the
@@ -922,7 +937,8 @@ trainers/   base.py      the shared training loop
             seg_hf.py    seg3d_monai.py  ultralytics_adapter.py
             torchvision_common.py  losses.py  preview.py
 metrics/    classification.py  segmentation.py  report.py
-export/     inference.py the checkpoint loader, prediction, Grad-CAM and export
+export/     inference.py the checkpoint loader, prediction and export
+            explain.py   Grad-CAM, LIME and SHAP for one prediction
 ui/         theme.py  components.py  charts.py  dir_picker.py  state.py  dataset_tools.py
 views/      0_Dashboard  1_Dataset  2_Model_Selection  3_Settings
             4_Training   5_Results  6_Inference
