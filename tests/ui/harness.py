@@ -1,6 +1,9 @@
 """Shared helpers for driving TrainStudio pages through streamlit's AppTest."""
-import os, pathlib, sys, warnings
+import os, pathlib, sys, tempfile, warnings
 warnings.filterwarnings("ignore")
+# Never the user's own ~/.trainstudio: its recent output folders would put their real
+# runs on the pages under test. Parts that need a known home set it before this import.
+os.environ.setdefault("TRAINSTUDIO_HOME", tempfile.mkdtemp(prefix="ts_home_"))
 # The project root is two levels up from tests/ui/. Pages are loaded by path,
 # and several of them read relative paths, so the working directory has to be
 # the project root as it is when `streamlit run app.py` starts.
