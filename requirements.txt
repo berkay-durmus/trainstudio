@@ -44,5 +44,7 @@ monai>=1.4
 tensorboard>=2.17
 nvidia-ml-py>=12.560 ; sys_platform != "darwin"
 grad-cam>=1.5
+shap>=0.46                  # explanations on the Inference page
+lime>=0.2.0.1
 onnx>=1.16
 onnxscript>=0.1        # required by the dynamic torch.onnx.export path

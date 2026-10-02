@@ -106,7 +106,14 @@ def _rebuild(cfg: RunConfig):
     if backend == Backend.HF:
         from transformers import AutoConfig, AutoModelForSemanticSegmentation
 
-        conf = AutoConfig.from_pretrained(cfg.model.arch, num_labels=n)
+        labels = {str(i): c for i, c in enumerate(cfg.dataset.classes)}
+        conf = AutoConfig.from_pretrained(cfg.model.arch, num_labels=n, id2label=labels,
+                                          label2id={v: int(k) for k, v in labels.items()})
+        if "mask2former" in cfg.model.arch.lower():
+            # Not a semantic-segmentation class in transformers; the trainer builds this one
+            from transformers import Mask2FormerForUniversalSegmentation
+
+            return Mask2FormerForUniversalSegmentation(conf)
         return AutoModelForSemanticSegmentation.from_config(conf)
     if backend == Backend.MONAI:
         from core.events import EventWriter
@@ -152,6 +159,30 @@ def read_input(path: str | Path, loaded: LoadedModel) -> np.ndarray:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def model_logits(out) -> torch.Tensor:
+    """A model's output as one tensor of class scores, (B, K) or (B, K, h, w).
+
+    torchvision segmentation returns a dict, HF models an output object, and
+    Mask2Former scores pixels through its queries — for that one the per-pixel
+    probabilities (Σ_q P(class | q) · mask_q, as in training) are returned as
+    log-probabilities, so that a softmax over them gives them back.
+    """
+    # HF outputs are dicts too, so they are recognised by their fields first
+    if hasattr(out, "class_queries_logits"):
+        class_probs = out.class_queries_logits.softmax(dim=-1)[..., :-1]
+        mask_probs = out.masks_queries_logits.sigmoid()
+        scores = torch.einsum("bqc,bqhw->bchw", class_probs, mask_probs)
+        scores = scores / scores.sum(1, keepdim=True).clamp_min(1e-6)
+        return scores.clamp_min(1e-6).log()
+    if hasattr(out, "logits"):
+        return out.logits
+    if isinstance(out, dict):
+        out = out.get("out", next(iter(out.values())))
+    if isinstance(out, (tuple, list)):          # Ultralytics Classify: (probs, logits)
+        out = out[-1]
+    return out
+
+
 @torch.no_grad()
 def predict(loaded: LoadedModel, image: np.ndarray) -> Prediction:
     import time
@@ -164,8 +195,7 @@ def predict(loaded: LoadedModel, image: np.ndarray) -> Prediction:
         return _predict_ultralytics(loaded, image, t0)
 
     x = preprocess(loaded, image).to(loaded.device)
-    out = loaded.model(x)
-    logits = out.logits if hasattr(out, "logits") else out
+    logits = model_logits(loaded.model(x))
 
     if loaded.task == Task.CLASSIFICATION:
         probs = torch.softmax(logits.float(), dim=1)[0].cpu().numpy()
@@ -230,53 +260,20 @@ def _predict_ultralytics(loaded: LoadedModel, image: np.ndarray, t0: float) -> P
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Grad-CAM — shows where a classification model is looking
+# Grad-CAM — kept for callers of the old name; export/explain.py does the work
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def gradcam(loaded: LoadedModel, image: np.ndarray, class_idx: int | None = None
             ) -> np.ndarray | None:
-    """Return the image with a heatmap overlaid; None if it cannot be produced."""
-    if loaded.task != Task.CLASSIFICATION or \
-            loaded.backend not in (Backend.TIMM, Backend.TORCHVISION):
-        return None
-    try:
-        import cv2
-        from pytorch_grad_cam import GradCAM
-        from pytorch_grad_cam.utils.image import show_cam_on_image
-    except ImportError:
-        return None
-
-    model = loaded.model
-    # Target the last convolution/block. The attribute differs per family, and
-    # for a plain ViT none of these match — Grad-CAM then returns None rather
-    # than a heatmap built from the wrong tensor.
-    target_layer = None
-    for attr in ("layer4", "stages", "blocks", "features", "norm"):
-        mod = getattr(model, attr, None)
-        if mod is not None:
-            try:
-                target_layer = mod[-1] if hasattr(mod, "__getitem__") else mod
-            except Exception:
-                target_layer = mod
-            break
-    if target_layer is None:
-        return None
+    """Return the image with a Grad-CAM heatmap overlaid; None if it cannot be produced."""
+    from export.explain import explain
 
     try:
-        x = preprocess(loaded, image).to(loaded.device)
-        targets = None
-        if class_idx is not None:
-            from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
-
-            targets = [ClassifierOutputTarget(class_idx)]
-        with GradCAM(model=model, target_layers=[target_layer]) as cam:
-            grayscale = cam(input_tensor=x, targets=targets)[0]
-        base = cv2.resize(image, (grayscale.shape[1], grayscale.shape[0]))
-        rgb = np.float32(base) / 255.0
-        if rgb.ndim == 2:
-            rgb = np.stack([rgb] * 3, axis=-1)
-        return show_cam_on_image(rgb, grayscale, use_rgb=True)
+        if class_idx is None:
+            pred = predict(loaded, image)
+            class_idx = int(pred.probs.argmax()) if pred.probs is not None else 0
+        return explain(loaded, image, "gradcam", class_idx).overlay
     except Exception:
         return None
 
