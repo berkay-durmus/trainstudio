@@ -5,6 +5,20 @@ Notable changes to TrainStudio. The format follows
 [Semantic Versioning](https://semver.org/) — before 1.0.0, a minor release may change
 behaviour.
 
+## [Unreleased]
+
+### Added
+- Pause and resume. **⏸ Pause** stops a run when its epoch ends and **⏹ Stop now** stops it
+  after the batch; a stopped or failed run can then be resumed from the Training page or
+  the Dashboard, from the end of its last finished epoch, with results identical to an
+  uninterrupted run. Every epoch writes `checkpoints/resume.pt`; `runner.py --resume`
+  continues from it.
+
+### Fixed
+- `seed` now reaches the augmentation: albumentations and MONAI transforms drew from
+  generators seeded by the OS, so two runs with the same seed differed, and every
+  DataLoader worker repeated the same augmentation sequence.
+
 ## [0.1.0] — 2026-10-02
 
 The first versioned release, licensed under the Apache License 2.0.
