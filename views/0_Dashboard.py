@@ -30,13 +30,18 @@ page_header("Dashboard", "System status, a summary of the flow and recent runs")
 dev = detect()
 tel = telemetry()
 
+# Training runs in its own process, so only a device-wide reading means anything
+# here: the torch allocator figures telemetry() falls back to count this process
+# alone and always read 0. NVML (which also reports gpu_pct) is device-wide; MPS
+# memory is the system RAM, whose usage has its own card.
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Compute device", {"cuda": "NVIDIA GPU", "mps": "Apple GPU", "cpu": "CPU"}[dev.kind])
 c2.metric(
     "Memory",
     f"{dev.total_memory_gb:.0f} GB",
-    f"{tel['gpu_mem_used_gb']:.1f} GB in use" if "gpu_mem_used_gb" in tel else None,
+    f"{tel['gpu_mem_used_gb']:.1f} GB in use" if dev.kind == "cuda" and "gpu_pct" in tel else None,
     delta_color="off",
+    help="Unified memory, shared with the system RAM" if dev.kind == "mps" else None,
 )
 c3.metric("Models in the catalogue", len(MODEL_REGISTRY))
 c4.metric("RAM usage", f"{tel.get('ram_pct', 0):.0f}%" if tel else "—")
