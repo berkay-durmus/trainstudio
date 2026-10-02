@@ -75,13 +75,31 @@ Streamlit then auto-discovers it, and a cold server whose first request is a dee
 are lost for every session until someone opens `/`. The folder picker (`ui/dir_picker.py`)
 keeps its own keys, `_dp::<key>::<name>`.
 
+**Backend capabilities.** `core/capabilities.py` says which settings each (backend, arch)
+can apply and under which keyword — dropout is `drop_rate` in timm, `decoder_dropout` in smp
+FPN, `dropout_prob` in MONAI SegResNet — and with what library default. The table was built
+by constructing each catalogue model and finding the value in its layers, because some
+constructors accept a keyword only to ignore it (torchvision ConvNeXt `dropout`). Trainers
+pass `model_kwargs(cfg)`, which sends only values that differ from the library default, and
+nothing at all for non-timm backends in a `config.json` older than `CONFIG_VERSION` 2.
+`core/recommend.py` starts these fields from the library default, and the Settings page's
+`field()` disables any field `supports()` rejects. Add a model → add its knobs here, measured.
+
+**Presets.** `core/presets.py` stores hp + aug as JSON under `TRAINSTUDIO_HOME/presets/`; a
+past run's `config.json` works as one too. `apply_preset` copies the recipe, copies
+model-specific fields (`MODEL_SPECIFIC`) only on request, never hardware fields, and skips
+task-specific or unsupported ones, returning the reasons.
+
 **Datasets.** `data/spec.py` defines the single canonical layout and the alias/case-insensitive
 folder-name matching, and also recognises YOLO's transposed `images/train` order. `data/scan.py`
 validates a dataset and computes its stats. Datasets are never modified. A train-only dataset
 gets a `splits.json` at its root, YOLO label conversion goes to a cache, and an optional
 `dataset.yaml` holds the task, modality, classes and CT window. Path input is sanitised
 (quotes, `file://`, `~`, `$VARS`) before use, and permission errors are reported, not raised
-(`core/paths.py`).
+(`core/paths.py`). `data/analysis.py` (the Dataset page's Analysis tab, `ui/dataset_tools.py`)
+reads every header and samples pixels; `data/standardize.py` writes a uniform-size copy that
+mirrors the source path for path (so `splits.json` carries over) into a sibling folder marked
+by `standardization.json` — the only feature that writes image data, and never in place.
 
 ## Testing notes
 
