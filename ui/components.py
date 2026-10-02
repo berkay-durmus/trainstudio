@@ -11,6 +11,7 @@ from typing import Iterable, Sequence
 
 import streamlit as st
 
+from core import __version__
 from ui.theme import PALETTE, STATUS_COLORS
 
 
@@ -59,7 +60,7 @@ def brand_sidebar() -> None:
         "<div class='ts-brand'>"
         "<div class='ts-brand-mark'>TS</div>"
         "<div><div class='ts-brand-name'>TrainStudio</div>"
-        "<div class='ts-brand-sub'>Model Training Platform</div></div>"
+        f"<div class='ts-brand-sub'>Model Training Platform · v{__version__}</div></div>"
         "</div>",
         unsafe_allow_html=True,
     )

@@ -6,6 +6,8 @@ report and an ONNX export. Built for medical and scientific imaging: it reads DI
 NIfTI as well as PNG/JPEG/TIFF, understands CT windowing, and never copies or uploads your
 data.
 
+**Version 0.1.0** · [Changelog](CHANGELOG.md) · [Apache License 2.0](#license)
+
 ```
 Dataset  →  Model Selection  →  Settings  →  Training  →  Results  →  Inference
 ```
@@ -47,6 +49,7 @@ framework re-rendering a page.
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
 - [Project layout](#project-layout)
+- [License](#license)
 
 ---
 
@@ -913,6 +916,26 @@ scripts/    check_dataset.py  make_dummy_dataset.py  set_proxy_password.sh
 tests/ui/   the AppTest suite and its synthetic fixtures
 docker/     entrypoint.sh  Caddyfile
 ```
+
+---
+
+## License
+
+TrainStudio is licensed under the [Apache License, Version 2.0](LICENSE).
+Copyright 2026 Berkay Ahmet Durmuş.
+
+You may use it, modify it and distribute it — commercially too — provided that you keep
+the copyright and license notices and pass on the [NOTICE](NOTICE) file with any copy or
+derivative work, which is how the original author is credited. Modified files must say that
+they were changed. The license comes with no warranty.
+
+**Third-party libraries keep their own licenses.** Most of what TrainStudio builds on is
+permissively licensed (PyTorch, timm, MONAI and transformers under BSD or Apache 2.0;
+segmentation-models-pytorch under MIT). One is not: **Ultralytics**, which provides the
+YOLO models, is licensed under the **AGPL-3.0**. Training or distributing with the YOLO
+models — including a Docker image, which installs Ultralytics — brings that work under the
+AGPL's terms; Ultralytics sells an enterprise license for uses that cannot follow them.
+TrainStudio's own code stays under Apache 2.0 either way.
 
 ---
 

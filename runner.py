@@ -24,6 +24,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from core import __version__                                 # noqa: E402
 from core.events import E, EventWriter                      # noqa: E402
 from core.schemas import Backend, RunConfig, RunStatus, Task  # noqa: E402
 
@@ -100,7 +101,7 @@ def main(argv: list[str] | None = None) -> int:
     status = RunStatus.FAILED
     try:
         writer.update_state(pid=os.getpid(), run_name=cfg.run_name)
-        writer.log(f"TrainStudio · run `{cfg.run_name}` · PID {os.getpid()}")
+        writer.log(f"TrainStudio {__version__} · run `{cfg.run_name}` · PID {os.getpid()}")
         writer.log(f"Model {cfg.model.display_name or cfg.model.arch} "
                    f"({cfg.model.backend.value}) · task {cfg.dataset.task.value}")
 

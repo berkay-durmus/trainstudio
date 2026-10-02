@@ -214,7 +214,10 @@ def environment_snapshot() -> dict:
     """Written to the run directory as env.json — for reproducibility."""
     import sys
 
+    from core import __version__
+
     snap = {
+        "trainstudio": __version__,
         "python": sys.version.split()[0],
         "platform": platform.platform(),
         "machine": platform.machine(),
