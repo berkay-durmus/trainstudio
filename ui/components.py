@@ -214,3 +214,28 @@ def delete_run_control(summary, key: str, label: str = "🗑️", width: str = "
                 st.rerun()
             else:
                 st.error(f"Not deleted: {why}")
+
+
+def resume_run_control(summary, key: str, width: str = "stretch") -> bool:
+    """A Resume button for a stopped or failed run that can be continued.
+
+    Shows nothing for any other run. Returns True once the run has been started
+    again, so the caller can rerun or move to the Training page.
+    """
+    from core import launcher, runs
+
+    ok, _, nxt = runs.resume_info(summary)
+    if not ok:
+        return False
+    tip = (f"Continue from epoch {nxt} of {summary.total_epochs}"
+           if not summary.total_epochs or nxt <= summary.total_epochs
+           else "Every epoch is done; finish writing the results")
+    if not st.button("▶ Resume", key=f"resume_{key}", type="primary", width=width, help=tip):
+        return False
+    try:
+        launcher.resume_run(summary.run_dir)
+    except launcher.LaunchError as exc:
+        st.error(f"Could not resume: {exc}")
+        return False
+    st.toast(f"Resuming {summary.run_name} from epoch {nxt}")
+    return True

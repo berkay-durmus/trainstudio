@@ -19,6 +19,7 @@ from ui.components import (
     fmt_duration,
     fmt_metric,
     page_header,
+    resume_run_control,
     status_pill,
 )
 
@@ -174,6 +175,9 @@ else:
             d.metric("Duration", fmt_duration(r.duration_s))
             with e:
                 if st.button("Open", key=f"open_{r.run_dir}", width="stretch"):
+                    state.put(state.K_ACTIVE_RUN, r.run_dir)
+                    st.switch_page("views/4_Training.py")
+                if resume_run_control(r, key=f"dash_{r.run_dir}"):
                     state.put(state.K_ACTIVE_RUN, r.run_dir)
                     st.switch_page("views/4_Training.py")
                 delete_run_control(r, key=f"dash_{r.run_dir}")

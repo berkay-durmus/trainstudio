@@ -693,7 +693,16 @@ is listed with the reason. Presets live in `~/.trainstudio/presets/` (`TRAINSTUD
 
 Loss and metric curves, per-epoch tables, validation previews, GPU and system utilisation,
 and the raw process output — all updated while the run continues. Closing the browser does
-not affect anything. **Stop** asks the trainer to finish cleanly and save `last.pt`.
+not affect anything.
+
+**Pausing and resuming.** **⏸ Pause** stops the run when the current epoch ends, and
+**⏹ Stop now** stops it after the current batch; both save `last.pt`. A stopped run — or
+one that failed: out of memory, the process killed, the machine restarted — shows
+**▶ Resume** on the Training page and the Dashboard. Resuming continues in the same run
+folder, with the same settings, from the end of the last finished epoch (after Stop now,
+the interrupted epoch is trained again). The optimizer, learning-rate schedule, EMA, best
+value and random state all come back, so a resumed run produces the same numbers as an
+uninterrupted one. Completed runs are not resumed, and runs started before 0.2.0 cannot be.
 
 ### 5 · Results
 
@@ -784,7 +793,11 @@ run can be watched from several tabs, and the framework re-rendering a page neve
 the run.
 
 **Stopping** is a `<run_dir>/STOP` file. The trainer notices it between batches, saves
-`last.pt` and exits cleanly.
+`last.pt` and exits cleanly. **Pausing** is a `PAUSE` file, read once per epoch. At the end
+of every epoch the trainer writes `checkpoints/resume.pt` with the whole training state;
+`runner.py --resume` continues from it, and it is deleted once the run completes.
+Ultralytics strips the optimizer from its own `last.pt` when training ends, so the adapter
+keeps an unstripped copy as `resume.pt` and resumes with Ultralytics' `resume=True`.
 
 ---
 
@@ -793,7 +806,7 @@ the run.
 ```
 <output_dir>/<run_name>/
 ├── config.json  env.json  state.json  events.jsonl  train.log
-├── checkpoints/   best.pt  last.pt
+├── checkpoints/   best.pt  last.pt  resume.pt (until the run completes)
 ├── metrics/       metrics.csv  metrics.xlsx  summary.json  per_class.csv
 ├── plots/         loss_curve.png  confusion_matrix.png  roc.png  pr.png …
 ├── previews/      ep_0001.png …            (validation samples)
@@ -816,6 +829,7 @@ on a server or in CI:
 
 ```bash
 python runner.py --config /path/to/runs/experiment-01/config.json
+python runner.py --config /path/to/runs/experiment-01/config.json --resume   # continue it
 
 # or inside the container:
 docker compose exec trainstudio python runner.py --config /path/to/config.json
@@ -851,6 +865,7 @@ real dataset is read. The first run trains those two models, so allow a few minu
 | `t5` | Every page inside `st.navigation`, the empty-state guards, one full Dataset → Model → Settings walk-through |
 | `t6` | Real predictions, Grad-CAM, TorchScript export, run comparison, finished-run panels |
 | `t7` | Deleting runs (and refusing a live one), regularisation fields per backend, presets across models and tasks, the detailed analysis and standardising — on copies, with a temporary `TRAINSTUDIO_HOME` |
+| `t8` | Pause, Stop now and a killed process, each resumed — the result identical to an uninterrupted run, each epoch once, paused time not counted; what is refused; the Training page and Dashboard controls — real CPU training runs |
 
 Two things AppTest cannot reach, checked a level lower instead: `st.data_editor` (the
 run-comparison checkboxes — the comparison functions are called directly) and the

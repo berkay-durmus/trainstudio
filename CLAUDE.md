@@ -20,7 +20,7 @@ python scripts/check_dataset.py <path>                 # how a dataset path is i
 python scripts/make_dummy_dataset.py --out /tmp/ts_data --kinds cls seg dicom seg3d
 
 python tests/ui/run_all.py                             # whole UI suite (builds fixtures first if missing)
-python tests/ui/run_all.py t4                          # one part (t1…t6)
+python tests/ui/run_all.py t4                          # one part (t1…t8)
 python tests/ui/run_all.py --rebuild                   # regenerate fixtures
 python tests/ui/t4_flow.py                             # run one part's script directly (fixtures must exist)
 ```
@@ -47,6 +47,10 @@ run directory, whose names are fixed in `core.schemas.Layout`:
 - `state.json`: atomically rewritten status / PID / latest epoch.
 - `STOP`: written by the UI. The trainer checks for it between batches, saves `last.pt` and exits with status 2.
 - `runner.out`: the process's stdout/stderr, where crashes before `fit()` show up.
+- `PAUSE`: written by the UI. The trainer checks it once per epoch and stops after writing
+  that epoch's `checkpoints/resume.pt` — the full training state (optimizer, scheduler,
+  EMA, history, RNG). `launcher.resume_run` restarts `runner.py --resume` in the same run
+  directory, appending to the same event stream; `runs.resume_info` says whether a run can be.
 
 So `runner.py` and everything under `trainers/`, `metrics/` and `data/` must not import
 Streamlit or `ui/`. `config.json` is the single source of truth for a run.
@@ -58,7 +62,10 @@ stop signal, event emission, checkpoints, metric tables and the final report. Su
 implement `build_model`, `build_data` and `new_metrics`, and optionally override
 `forward_batch`, `compute_loss` and `save_preview`. A new backend needs a `Backend` enum
 value, registry entries, a trainer, a branch in `build_trainer`, and checkpoint-loading
-support in `export/inference.py`.
+support in `export/inference.py`. Build every DataLoader with
+`**self.loader_source(split, dataset)`: the training split then draws its order and a
+per-sample augmentation seed from torch's RNG (`data/seeding.py`), which is what makes
+`hp.seed` reproducible and a resumed run identical to an uninterrupted one.
 
 **Model catalogue and recommendations.** `core/registry.py` is a static list of `ModelSpec`
 whose `arch` is passed straight to the backend library. Each spec's `rec` dict feeds

@@ -37,6 +37,7 @@ class RunSummary:
     duration_s: float | None = None
     pid: int | None = None
     error: str | None = None
+    resume_epoch: int | None = None     # the last epoch checkpoints/resume.pt holds
     config: RunConfig | None = field(default=None, repr=False)
 
     @property
@@ -158,8 +159,11 @@ def load_summary(run_dir: str | Path) -> RunSummary | None:
         s.updated_at = st.get("updated_at")
         s.pid = st.get("pid")
         s.error = st.get("error") or s.error
+        s.resume_epoch = st.get("resume_epoch")
         if s.started_at and s.updated_at:
-            s.duration_s = max(0.0, s.updated_at - s.started_at)
+            # A resumed run counts the sessions before this one, not the pause between
+            s.duration_s = (float(st.get("elapsed_before") or 0.0)
+                            + max(0.0, s.updated_at - s.started_at))
 
     # A 'running' label is misleading once the process is gone
     if s.status == RunStatus.RUNNING and not process_alive(s.pid):
@@ -308,6 +312,27 @@ def is_deletable(s: RunSummary) -> bool:
     if s.status in (RunStatus.RUNNING, RunStatus.QUEUED) and process_alive(s.pid):
         return False
     return True
+
+
+def resume_info(s: RunSummary) -> tuple[bool, str, int | None]:
+    """Can this run be continued → (ok, the reason when not, the next epoch).
+
+    Only an unfinished run is resumed, with its own config.json unchanged, from the
+    end of the last epoch that `checkpoints/resume.pt` holds.
+    """
+    if s.status in (RunStatus.RUNNING, RunStatus.QUEUED) and process_alive(s.pid):
+        return False, "The run is still in progress.", None
+    if s.status == RunStatus.COMPLETED:
+        return False, "Completed runs cannot be resumed.", None
+    if s.status not in (RunStatus.STOPPED, RunStatus.FAILED):
+        return False, "The run has not started yet.", None
+    if not s.has(Layout.RESUME):
+        if s.resume_epoch is None and s.epoch:
+            return False, "This run was started before resuming was supported.", None
+        return False, "It stopped before its first epoch ended, so there is nothing to resume.", None
+    # Past the last epoch when the process died while writing the results: a
+    # resume then only finishes those.
+    return True, "", (s.resume_epoch or 0) + 1
 
 
 def delete_run(run_dir: str | Path) -> tuple[bool, str]:
